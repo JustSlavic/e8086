@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define ARRAY_COUNT(ARRAY) (sizeof(ARRAY) / sizeof(ARRAY[0]))
 
@@ -263,6 +264,7 @@ void mov2(memory_buffer *buffer, opcode_info *info)
     (void) displacement;
 
     int32 data = 0;
+    (void) data;
     if (w)
     {
         data = *(int16 *) (buffer->data + buffer->index);
@@ -319,7 +321,7 @@ int main()
 
     // decoding
 
-    fprintf(stdout, "; read %llu bytes\nbits 16\n", n);
+    fprintf(stdout, "; read %zu bytes\nbits 16\n", n);
 
     while (buffer.index < n)
     {
