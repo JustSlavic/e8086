@@ -16,6 +16,44 @@ typedef   signed int    int32;
 typedef unsigned int   uint32;
 
 
+void print_binary8(uint8 n)
+{
+    uint32 mask = 0b10000000;
+    for (int i = 0; i < 8; i++)
+    {
+        printf("%d", (mask & n) > 0);
+        mask = (mask >> 1);
+    }
+}
+
+void print_binary16(uint16 n)
+{
+    uint32 mask = 0b1000000000000000;
+    for (int i = 0; i < 16; i++)
+    {
+        printf("%d", (mask & n) > 0);
+        mask = (mask >> 1);
+    }
+}
+
+void print_binary32(uint32 n)
+{
+    uint32 mask = 0b10000000000000000000000000000000;
+    for (int i = 0; i < 32; i++)
+    {
+        printf("%d", (mask & n) > 0);
+        mask = (mask >> 1);
+    }
+}
+
+
+/*
+    sp - stack pointer
+    bp - base pointer
+    si - source index
+    di - destination index
+*/
+
 // @note: only first 6 bits are meaningful
 int opcode_mask = 0b11111100;
 
@@ -28,6 +66,14 @@ enum opcode
     OPCODE_MOV5 = 0b10100010, // mov (accumulator to memory)
     OPCODE_MOV6 = 0b10001110, // mov (register/memory to segment register)
     OPCODE_MOV7 = 0b10001100, // mov (segment register to register/memory)
+
+    OPCODE_ADD1 = 0b00000000, // add (reg/memory with register to either)
+    OPCODE_ADD3 = 0b00000100, // add (immediate to accumulator)
+
+    OPCODE_SUB1 = 0b00101000, // sub (reg/memory and register to either)
+    OPCODE_SUB3 = 0b00101100, // sub (immediate from accumulator)
+
+    OPCODE_IMM_TO_REG_MEM = 0b10000000, // add (immediate to register/memory)
 };
 
 enum
@@ -55,6 +101,14 @@ opcode_info opcode_table[] =
     { OPCODE_MOV5, 0b11111110, 7, "mov" },
     { OPCODE_MOV6, 0b11111111, 8, "mov" },
     { OPCODE_MOV7, 0b11111111, 8, "mov" },
+
+    { OPCODE_ADD1, 0b11111100, 6, "add" },
+    { OPCODE_ADD3, 0b11111110, 7, "add" },
+
+    { OPCODE_SUB1, 0b11111100, 6, "sub" },
+    { OPCODE_SUB3, 0b11111110, 7, "sub" },
+
+    { OPCODE_IMM_TO_REG_MEM, 0b11111100, 6, "???" },
 };
 
 char const *register_names[8][2] =
@@ -76,106 +130,100 @@ typedef struct
     uint32 index;
 } memory_buffer;
 
-struct displacement
+typedef struct
 {
-    uint32 registers[2];
-    uint32 register_count; // 0, 1, or 2
-    uint32 additive;
+    uint32 reg1, reg2;
+    uint32 reg_count; // 0, 1, or 2
+    uint32 displacement;
+} effective_address_calculation;
+
+
+effective_address_calculation eac_table[8] =
+{
+    { .reg1 = 3, .reg2 = 6, .reg_count = 2 }, // (bx + si + displacement)
+    { .reg1 = 3, .reg2 = 7, .reg_count = 2 }, // (bx + di + displacement)
+    { .reg1 = 5, .reg2 = 6, .reg_count = 2 }, // (bp + si + displacement)
+    { .reg1 = 5, .reg2 = 7, .reg_count = 2 }, // (bp + di + displacement)
+    { .reg1 = 6, .reg_count = 1 },            // (si + displacement)
+    { .reg1 = 7, .reg_count = 1 },            // (di + displacement)
+    { .reg1 = 5, .reg_count = 1 },            // (bp + displacement) OR direct address
+    { .reg1 = 3, .reg_count = 1 },            // (bx + displacement)
 };
 
 
-struct displacement make_displacement(memory_buffer *buffer, int32 mod, int32 r_m)
+effective_address_calculation read_eac(memory_buffer *buffer, int32 mod, int32 r_m)
 {
-    struct displacement displacement = {};
-
-    switch (r_m)
-    {
-        case 0b000: // (bx + si + displacement)
-        {
-            displacement.registers[0] = 3; // bx
-            displacement.registers[1] = 6; // si
-            displacement.register_count = 2;
-        }
-        break;
-
-        case 0b001: // (bx + di + displacement)
-        {
-            displacement.registers[0] = 3; // bx
-            displacement.registers[1] = 7; // di
-            displacement.register_count = 2;
-        }
-        break;
-
-        case 0b010: // (bp + si + displacement)
-        {
-            displacement.registers[0] = 5; // bp
-            displacement.registers[1] = 6; // si
-            displacement.register_count = 2;
-        }
-        break;
-
-        case 0b011: // (bp + di + displacement)
-        {
-            displacement.registers[0] = 5; // bp
-            displacement.registers[1] = 7; // di
-            displacement.register_count = 2;
-        }
-        break;
-
-        case 0b100: // (si + displacement)
-        {
-            displacement.registers[0] = 6; // si
-            displacement.register_count = 1;
-        }
-        break;
-
-        case 0b101: // (di + displacement)
-        {
-            displacement.registers[0] = 7; // di
-            displacement.register_count = 1;
-        }
-        break;
-
-        case 0b110: // direct address or (bp + displacement)
-        {
-            if (mod == MOD_MM)
-            {} // direct address, no registers involved
-            else
-            {
-                displacement.registers[0] = 5; // bp
-                displacement.register_count = 1;
-            }
-        }
-        break;
-
-        case 0b111: // (bx + displacement)
-        {
-            displacement.registers[0] = 3; // bx
-            displacement.register_count = 1;
-        }
-        break;
-    }
+    effective_address_calculation eac = eac_table[r_m];
 
     if (mod == MOD_MM)
     {
-        // no additive
+        // Direct address reading
+        if (r_m == 0b110)
+        {
+            eac.reg_count = 0;
+            eac.displacement = *(int16 *) (buffer->data + buffer->index);
+            buffer->index += 2;
+        }
     }
     else if (mod == MOD_MM8)
     {
-        displacement.additive = *(int8 *) (buffer->data + buffer->index);
+        eac.displacement = *(int8 *) (buffer->data + buffer->index);
         buffer->index += 1;
     }
     else if (mod == MOD_MM16)
     {
-        displacement.additive = *(int16 *) (buffer->data + buffer->index);
+        eac.displacement = *(int16 *) (buffer->data + buffer->index);
         buffer->index += 2;
     }
 
-    return displacement;
+    return eac;
 }
 
 
-void mov1(memory_buffer *buffer, opcode_info *info)
+void print_eac(effective_address_calculation eac)
+{
+    if (eac.reg_count == 0)
+    {
+        printf("[%d]", eac.displacement);
+    }
+    else if (eac.reg_count == 1)
+    {
+        printf("[%s", register_names[eac.reg1][1]);
+        if (eac.displacement == 0)
+        {
+            printf("]");
+        }
+        else
+        {
+            printf(" + %d]", eac.displacement);
+        }
+    }
+    else if (eac.reg_count == 2)
+    {
+        printf("[%s + %s", register_names[eac.reg1][1],
+            register_names[eac.reg2][1]);
+        if (eac.displacement == 0)
+        {
+            printf("]");
+        }
+        else
+        {
+            printf(" + %d]", eac.displacement);
+        }
+    }
+}
+
+
+int32 read_data_bytes(memory_buffer *buffer, int32 w, int32 s)
+{
+    int32 data = (!s && w) ? *(int16 *) (buffer->data + buffer->index)
+                           : *(int8 *)  (buffer->data + buffer->index);
+    buffer->index += (!s && w) ? 2 : 1;
+    return data;
+}
+
+
+void instruction_type1(memory_buffer *buffer, opcode_info *info)
 {
     uint8 byte1 = buffer->data[buffer->index++];
     uint8 byte2 = buffer->data[buffer->index++];
@@ -200,8 +248,8 @@ void mov1(memory_buffer *buffer, opcode_info *info)
     }
     else
     {
-        struct displacement displacement = make_displacement(buffer, mod, r_m);
-        (void) displacement;
+        effective_address_calculation eac = read_eac(buffer, mod, r_m);
+        (void) eac;
 
         printf("    %s ", info->name);
 
@@ -210,33 +258,33 @@ void mov1(memory_buffer *buffer, opcode_info *info)
             printf("%s, ", register_names[reg][w]);
         }
 
-        if (displacement.register_count == 0)
+        if (eac.reg_count == 0)
         {
-            printf("[%d]", displacement.additive);
+            printf("[%d]", eac.displacement);
         }
-        else if (displacement.register_count == 1)
+        else if (eac.reg_count == 1)
         {
-            printf("[%s", register_names[displacement.registers[0]][1]);
-            if (displacement.additive == 0)
+            printf("[%s", register_names[eac.reg1][1]);
+            if (eac.displacement == 0)
             {
                 printf("]");
             }
             else
             {
-                printf(" + %d]", displacement.additive);
+                printf(" + %d]", eac.displacement);
             }
         }
-        else if (displacement.register_count == 2)
+        else if (eac.reg_count == 2)
         {
-            printf("[%s + %s", register_names[displacement.registers[0]][1],
-                register_names[displacement.registers[1]][1]);
-            if (displacement.additive == 0)
+            printf("[%s + %s", register_names[eac.reg1][1],
+                register_names[eac.reg2][1]);
+            if (eac.displacement == 0)
             {
                 printf("]");
             }
             else
             {
-                printf(" + %d]", displacement.additive);
+                printf(" + %d]", eac.displacement);
             }
         }
 
@@ -250,7 +298,7 @@ void mov1(memory_buffer *buffer, opcode_info *info)
 }
 
 
-void mov2(memory_buffer *buffer, opcode_info *info)
+void instruction_mov_imm_to_reg_mem(memory_buffer *buffer, opcode_info *info)
 {
     uint8 byte1 = buffer->data[buffer->index++];
     uint8 byte2 = buffer->data[buffer->index++];
@@ -260,50 +308,93 @@ void mov2(memory_buffer *buffer, opcode_info *info)
     int32 mod = (0b11000000 & byte2) >> 6;
     int32 r_m = (0b00000111 & byte2);
 
-    struct displacement displacement = make_displacement(buffer, mod, r_m);
-    (void) displacement;
+    effective_address_calculation eac = read_eac(buffer, mod, r_m);
+    (void) eac;
 
-    int32 data = 0;
+    int32 data = read_data_bytes(buffer, w, 0);
     (void) data;
-    if (w)
-    {
-        data = *(int16 *) (buffer->data + buffer->index);
-        buffer->index += 2;
-    }
-    else
-    {
-        data = buffer->data[buffer->index];
-        buffer->index += 1;
-    }
 }
 
 
-void mov3(memory_buffer *buffer, opcode_info *info)
+void instruction_imm_to_reg(memory_buffer *buffer, opcode_info *info)
 {
     uint8 byte1 = buffer->data[buffer->index++];
 
     int32 w = 0b00001000 & byte1;
     int32 reg = 0b00000111 & byte1;
 
-    int32 data = 0;
-    if (w)
-    {
-        data = *(int16 *) (buffer->data + buffer->index);
-        buffer->index += 2;
-    }
-    else
-    {
-        data = *(int8 *) (buffer->data + buffer->index);
-        buffer->index += 1;
-    }
+    int32 data = read_data_bytes(buffer, w, 0);
 
     printf("    %s %s, %d\n", info->name, register_names[reg][w], (int) data);
 }
 
 
+void mov45(memory_buffer *buffer, opcode_info *info, bool reverse_order)
+{
+    uint8 byte1 = buffer->data[buffer->index++];
+
+    int32 w = 0b00000001 & byte1;
+
+    int32 addr = read_data_bytes(buffer, w, 0);
+
+    if (reverse_order)
+        printf("    %s [%d], ax\n", info->name, addr);
+    else
+        printf("    %s ax, [%d]\n", info->name, addr);
+}
+
+
+void instruction_imm_to_reg_mem(memory_buffer *buffer, opcode_info *info)
+{
+    uint8 byte1 = buffer->data[buffer->index++];
+    uint8 byte2 = buffer->data[buffer->index++];
+
+    int32 s = 0b00000010 & byte1;
+    int32 w = 0b00000001 & byte1;
+
+    int32 mod = (0b11000000 & byte2) >> 6;
+    int32 opc = (0b00111000 & byte2) >> 3;
+    int32 r_m = (0b00000111 & byte2);
+
+    switch (opc)
+    {
+    case 0b000: printf("    add"); break;
+    case 0b101: printf("    sub"); break;
+    default:
+        printf("unknown sub_opcode\n");
+        exit(1);
+    }
+
+    if (mod == MOD_RM)
+    {
+        printf(" %s", register_names[r_m][w]);
+    }
+    else
+    {
+        printf(" ");
+        effective_address_calculation eac = read_eac(buffer, mod, r_m);
+        print_eac(eac);
+    }
+
+    int32 data = read_data_bytes(buffer, w, s);
+    printf(", %d\n", data);
+}
+
+
+void instruction_imm_to_acc(memory_buffer *buffer, opcode_info *info)
+{
+    uint8 byte1 = buffer->data[buffer->index++];
+
+    int32 w = 0b00000001 & byte1;
+    int32 data = read_data_bytes(buffer, w, 0);
+
+    printf("    %s ax, %d\n", info->name, (int) data);
+}
+
+
 int main()
 {
-    char const *filename = "assignment2";
+    char const *filename = "computer_enhance/perfaware/part1/listing_0041_add_sub_cmp_jnz";
 
     FILE *f = fopen(filename, "r");
     if (!f) {
@@ -321,6 +412,9 @@ int main()
 
     // decoding
 
+    // print_binary8(0b10000000);
+    // printf("\n\n");
+
     fprintf(stdout, "; read %zu bytes\nbits 16\n", n);
 
     while (buffer.index < n)
@@ -332,6 +426,25 @@ int main()
         {
             info = opcode_table[opcode_index];
             int32 opcode = (byte & info.mask);
+
+            // printf("BYTE:          0b");
+            // print_binary8(byte);
+            // printf("\n");
+
+            // printf("mask:          0b");
+            // print_binary8(info.mask);
+            // printf("\n");
+
+            // printf("%03d: opcode =  0b", opcode_index);
+            // print_binary8(opcode);
+            // printf("\n");
+
+            // printf("info.opcode =  0b");
+            // print_binary8(info.opcode);
+            // printf("\n");
+
+            // printf("\n");
+
             if (opcode == info.opcode)
             {
                 found = true;
@@ -340,22 +453,39 @@ int main()
         }
         if (!found)
         {
-            printf("Unsupported opcode '0x%x'!\n", info.opcode);
+            printf("Can't find opcode for byte: 0b");
+            print_binary8(byte);
+            printf("\n");
             exit(1);
         }
 
-        // printf("Found opcode '0x%x'\n", info.opcode);
+        // printf("Found opcode: 0b");
+        // print_binary8(info.opcode);
+        // printf("\n");
 
-        if (info.opcode == OPCODE_MOV1)      mov1(&buffer, &info);
-        else if (info.opcode == OPCODE_MOV2) mov2(&buffer, &info);
-        else if (info.opcode == OPCODE_MOV3) mov3(&buffer, &info);
-        // else if (info.opcode == OPCODE_MOV4) ;
-        else
+        switch (info.opcode)
         {
+        case OPCODE_MOV1: instruction_type1(&buffer, &info); break;
+        case OPCODE_MOV2: instruction_mov_imm_to_reg_mem(&buffer, &info); break;
+        case OPCODE_MOV3: instruction_imm_to_reg(&buffer, &info); break;
+        case OPCODE_MOV4: mov45(&buffer, &info, false); break;
+        case OPCODE_MOV5: mov45(&buffer, &info, true); break;
+
+        case OPCODE_ADD1: instruction_type1(&buffer, &info); break;
+        case OPCODE_ADD3: instruction_imm_to_acc(&buffer, &info); break;
+
+        case OPCODE_SUB1: instruction_type1(&buffer, &info); break;
+        case OPCODE_SUB3: instruction_imm_to_acc(&buffer, &info); break;
+
+        case OPCODE_IMM_TO_REG_MEM:
+            instruction_imm_to_reg_mem(&buffer, &info); break;
+
+        default:
             printf("Don't know what to do!\n");
-            break;
+            exit(1);
         }
     }
+
 
     return 0;
 }
