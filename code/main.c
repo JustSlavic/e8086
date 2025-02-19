@@ -73,6 +73,30 @@ enum opcode
     OPCODE_SUB1 = 0b00101000, // sub (reg/memory and register to either)
     OPCODE_SUB3 = 0b00101100, // sub (immediate from accumulator)
 
+    OPCODE_CMP1 = 0b00111000, // cmp (reg/memory and register)
+    OPCODE_CMP3 = 0b00111100, // cmp (immediate with accumulator)
+
+    OPCODE_JE   = 0b01110100, // jump on equal / zero
+    OPCODE_JL   = 0b01111100, // jump on less / not greater or equal
+    OPCODE_JLE  = 0b01111110, // jump on less or equal / not greater
+    OPCODE_JB   = 0b01110010, // jump on below/not above or equal
+    OPCODE_JBE  = 0b01110110, // jump on below or equal / not above
+    OPCODE_JP   = 0b01111010, // jump on parity / parity even
+    OPCODE_JO   = 0b01110000, // jump on overflow
+    OPCODE_JS   = 0b01111000, // jump on sign
+    OPCODE_JNE  = 0b01110101, // jump on not equal / not zero
+    OPCODE_JNL  = 0b01111101, // jump on not less / greater or equal
+    OPCODE_JNLE = 0b01111111, // jump on not less or equal / greater
+    OPCODE_JNB  = 0b01110011, // jump on not below / above or equal
+    OPCODE_JNBE = 0b01110111, // jump on not below or equal / above
+    OPCODE_JNP  = 0b01111011, // jump on not par / par odd
+    OPCODE_JNO  = 0b01110001, // jump on not overflow
+    OPCODE_JNS  = 0b01111001, // jump on not sign
+    OPCODE_LOOP = 0b11100010, // loop CX times
+    OPCODE_LOOPZ = 0b11100001, // loop while zero
+    OPCODE_LOOPNZ = 0b11100000, // loop while not zero
+    OPCODE_JCXZ = 0b11100011, // jump on CX zero
+
     OPCODE_IMM_TO_REG_MEM = 0b10000000, // add (immediate to register/memory)
 };
 
@@ -88,27 +112,50 @@ typedef struct
 {
     enum opcode opcode;
     int mask;
-    int nbits;
     char const *name;
 } opcode_info;
 
 opcode_info opcode_table[] =
 {
-    { OPCODE_MOV1, 0b11111100, 6, "mov" },
-    { OPCODE_MOV2, 0b11111110, 7, "mov" },
-    { OPCODE_MOV3, 0b11110000, 4, "mov" },
-    { OPCODE_MOV4, 0b11111110, 7, "mov" },
-    { OPCODE_MOV5, 0b11111110, 7, "mov" },
-    { OPCODE_MOV6, 0b11111111, 8, "mov" },
-    { OPCODE_MOV7, 0b11111111, 8, "mov" },
+    { OPCODE_MOV1, 0b11111100, "mov" },
+    { OPCODE_MOV2, 0b11111110, "mov" },
+    { OPCODE_MOV3, 0b11110000, "mov" },
+    { OPCODE_MOV4, 0b11111110, "mov" },
+    { OPCODE_MOV5, 0b11111110, "mov" },
+    { OPCODE_MOV6, 0b11111111, "mov" },
+    { OPCODE_MOV7, 0b11111111, "mov" },
 
-    { OPCODE_ADD1, 0b11111100, 6, "add" },
-    { OPCODE_ADD3, 0b11111110, 7, "add" },
+    { OPCODE_ADD1, 0b11111100, "add" },
+    { OPCODE_ADD3, 0b11111110, "add" },
 
-    { OPCODE_SUB1, 0b11111100, 6, "sub" },
-    { OPCODE_SUB3, 0b11111110, 7, "sub" },
+    { OPCODE_SUB1, 0b11111100, "sub" },
+    { OPCODE_SUB3, 0b11111110, "sub" },
 
-    { OPCODE_IMM_TO_REG_MEM, 0b11111100, 6, "???" },
+    { OPCODE_CMP1, 0b11111100, "cmp" },
+    { OPCODE_CMP3, 0b11111110, "cmp" },
+
+    { OPCODE_JE,   0b11111111, "je" },
+    { OPCODE_JL,   0b11111111, "jl" },
+    { OPCODE_JLE,  0b11111111, "jle" },
+    { OPCODE_JB,   0b11111111, "jb" },
+    { OPCODE_JBE,  0b11111111, "jbe" },
+    { OPCODE_JP,   0b11111111, "jp" },
+    { OPCODE_JO,   0b11111111, "jo" },
+    { OPCODE_JS,   0b11111111, "js" },
+    { OPCODE_JNE,  0b11111111, "jne" },
+    { OPCODE_JNL,  0b11111111, "jnl" },
+    { OPCODE_JNLE, 0b11111111, "jnle" },
+    { OPCODE_JNB,  0b11111111, "jnb" },
+    { OPCODE_JNBE, 0b11111111, "jnbe" },
+    { OPCODE_JNP,  0b11111111, "jnp" },
+    { OPCODE_JNO,  0b11111111, "jno" },
+    { OPCODE_JNS,  0b11111111, "jns" },
+    { OPCODE_LOOP, 0b11111111, "loop" },
+    { OPCODE_LOOPZ, 0b11111111, "loopz" },
+    { OPCODE_LOOPNZ, 0b11111111, "loopnz" },
+    { OPCODE_JCXZ, 0b11111111, "jcxz" },
+
+    { OPCODE_IMM_TO_REG_MEM, 0b11111100, "???" },
 };
 
 char const *register_names[8][2] =
@@ -360,6 +407,7 @@ void instruction_imm_to_reg_mem(memory_buffer *buffer, opcode_info *info)
     {
     case 0b000: printf("    add"); break;
     case 0b101: printf("    sub"); break;
+    case 0b111: printf("    cmp"); break;
     default:
         printf("unknown sub_opcode\n");
         exit(1);
@@ -388,7 +436,16 @@ void instruction_imm_to_acc(memory_buffer *buffer, opcode_info *info)
     int32 w = 0b00000001 & byte1;
     int32 data = read_data_bytes(buffer, w, 0);
 
-    printf("    %s ax, %d\n", info->name, (int) data);
+    printf("    %s %s, %d\n", info->name, w ? "ax" : "al", (int) data);
+}
+
+
+void instruction_jumps(memory_buffer *buffer, opcode_info *info)
+{
+    buffer->index++; // first byte is fully opcode
+    int8 ip_inc8 = buffer->data[buffer->index++];
+
+    printf("    %s %d\n", info->name, (int) ip_inc8);
 }
 
 
@@ -476,6 +533,32 @@ int main()
 
         case OPCODE_SUB1: instruction_type1(&buffer, &info); break;
         case OPCODE_SUB3: instruction_imm_to_acc(&buffer, &info); break;
+
+        case OPCODE_CMP1: instruction_type1(&buffer, &info); break;
+        case OPCODE_CMP3: instruction_imm_to_acc(&buffer, &info); break;
+
+        case OPCODE_JE:
+        case OPCODE_JL:
+        case OPCODE_JLE:
+        case OPCODE_JB:
+        case OPCODE_JBE:
+        case OPCODE_JP:
+        case OPCODE_JO:
+        case OPCODE_JS:
+        case OPCODE_JNE:
+        case OPCODE_JNL:
+        case OPCODE_JNLE:
+        case OPCODE_JNB:
+        case OPCODE_JNBE:
+        case OPCODE_JNP:
+        case OPCODE_JNO:
+        case OPCODE_JNS:
+        case OPCODE_LOOP:
+        case OPCODE_LOOPZ:
+        case OPCODE_LOOPNZ:
+        case OPCODE_JCXZ:
+            instruction_jumps(&buffer, &info);
+            break;
 
         case OPCODE_IMM_TO_REG_MEM:
             instruction_imm_to_reg_mem(&buffer, &info); break;
