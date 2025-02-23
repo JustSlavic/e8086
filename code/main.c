@@ -105,78 +105,15 @@ enum
     MOD_RM   = 0b11,
 };
 
-typedef struct
-{
-    enum opcode opcode;
-    int mask;
-    char const *name;
-} opcode_info;
-
-opcode_info opcode_table[] =
-{
-    { OPCODE_MOV1, 0b11111100, "mov" },
-    { OPCODE_MOV2, 0b11111110, "mov" },
-    { OPCODE_MOV3, 0b11110000, "mov" },
-    { OPCODE_MOV4, 0b11111110, "mov" },
-    { OPCODE_MOV5, 0b11111110, "mov" },
-    { OPCODE_MOV6, 0b11111111, "mov" },
-    { OPCODE_MOV7, 0b11111111, "mov" },
-
-    { OPCODE_ADD1, 0b11111100, "add" },
-    { OPCODE_ADD3, 0b11111110, "add" },
-
-    { OPCODE_SUB1, 0b11111100, "sub" },
-    { OPCODE_SUB3, 0b11111110, "sub" },
-
-    { OPCODE_CMP1, 0b11111100, "cmp" },
-    { OPCODE_CMP3, 0b11111110, "cmp" },
-
-    { OPCODE_JE,   0b11111111, "je" },
-    { OPCODE_JL,   0b11111111, "jl" },
-    { OPCODE_JLE,  0b11111111, "jle" },
-    { OPCODE_JB,   0b11111111, "jb" },
-    { OPCODE_JBE,  0b11111111, "jbe" },
-    { OPCODE_JP,   0b11111111, "jp" },
-    { OPCODE_JO,   0b11111111, "jo" },
-    { OPCODE_JS,   0b11111111, "js" },
-    { OPCODE_JNE,  0b11111111, "jne" },
-    { OPCODE_JNL,  0b11111111, "jnl" },
-    { OPCODE_JNLE, 0b11111111, "jnle" },
-    { OPCODE_JNB,  0b11111111, "jnb" },
-    { OPCODE_JNBE, 0b11111111, "jnbe" },
-    { OPCODE_JNP,  0b11111111, "jnp" },
-    { OPCODE_JNO,  0b11111111, "jno" },
-    { OPCODE_JNS,  0b11111111, "jns" },
-    { OPCODE_LOOP, 0b11111111, "loop" },
-    { OPCODE_LOOPZ, 0b11111111, "loopz" },
-    { OPCODE_LOOPNZ, 0b11111111, "loopnz" },
-    { OPCODE_JCXZ, 0b11111111, "jcxz" },
-
-    { OPCODE_IMM_TO_REG_MEM, 0b11111100, "???" },
-};
-
 enum
 {
-    REGISTER_AL = 0b0000000000000001,
-    REGISTER_AH = 0b0000000000000010,
-    REGISTER_AX = REGISTER_AH | REGISTER_AL,
-
-    REGISTER_BL = 0b0000000000000100,
-    REGISTER_BH = 0b0000000000001000,
-    REGISTER_BX = REGISTER_BH | REGISTER_BL,
-
-    REGISTER_CL = 0b0000000000010000,
-    REGISTER_CH = 0b0000000000100000,
-    REGISTER_CX = REGISTER_CH | REGISTER_CL,
-
-    REGISTER_DL = 0b0000000001000000,
-    REGISTER_DH = 0b0000000010000000,
-    REGISTER_DX = REGISTER_DH | REGISTER_DL,
-
-    REGISTER_SP = 0b0000000100000000,
-    REGISTER_BP = 0b0000001000000000,
-    REGISTER_SI = 0b0000010000000000,
-    REGISTER_DI = 0b0000100000000000,
+/*
+   0    1    2    3    4    5    6    7    8    9   10   11   12   13   14   15
+  al   cl   dl   bl   ah   ch   dh   bh   ax   cx   dx   bx   sp   bp   si   di
+ 000  001  010  011  100  101  110  111 1000 1001 1010 1011 1100 1101 1110 1111
+*/
+    R_AL, R_CL, R_DL, R_BL, R_AH, R_CH, R_DH, R_BH,
+    R_AX, R_CX, R_DX, R_BX, R_SP, R_BP, R_SI, R_DI,
 };
 
 typedef struct
@@ -193,11 +130,33 @@ typedef struct
 
 typedef enum
 {
-    I_NONE,
+    I_NOOP,
 
     I_MOV,
     I_ADD,
     I_SUB,
+
+    I_CMP,
+    I_JE,
+    I_JL,
+    I_JLE,
+    I_JB,
+    I_JBE,
+    I_JP,
+    I_JO,
+    I_JS,
+    I_JNE,
+    I_JNL,
+    I_JNLE,
+    I_JNB,
+    I_JNBE,
+    I_JNP,
+    I_JNO,
+    I_JNS,
+    I_LOOP,
+    I_LOOPZ,
+    I_LOOPNZ,
+    I_JCXZ,
 } instruction_tag;
 
 typedef enum
@@ -234,17 +193,141 @@ typedef struct
     instruction_operand source, destination;
 } instruction;
 
-char const *register_names[8][2] =
+typedef struct
 {
-    { "al", "ax" }, // 0
-    { "cl", "cx" }, // 1
-    { "dl", "dx" }, // 2
-    { "bl", "bx" }, // 3
-    { "ah", "sp" }, // 4
-    { "ch", "bp" }, // 5
-    { "dh", "si" }, // 6
-    { "bh", "di" }, // 7
+    enum opcode opcode;
+    int mask;
+    instruction_tag instruction;
+} opcode_info;
+
+opcode_info opcode_table[] =
+{
+    { OPCODE_MOV1, 0b11111100, I_MOV },
+    { OPCODE_MOV2, 0b11111110, I_MOV },
+    { OPCODE_MOV3, 0b11110000, I_MOV },
+    { OPCODE_MOV4, 0b11111110, I_MOV },
+    { OPCODE_MOV5, 0b11111110, I_MOV },
+    { OPCODE_MOV6, 0b11111111, I_MOV },
+    { OPCODE_MOV7, 0b11111111, I_MOV },
+
+    { OPCODE_ADD1, 0b11111100, I_ADD },
+    { OPCODE_ADD3, 0b11111110, I_ADD },
+
+    { OPCODE_SUB1, 0b11111100, I_SUB },
+    { OPCODE_SUB3, 0b11111110, I_SUB },
+
+    { OPCODE_CMP1, 0b11111100, I_CMP },
+    { OPCODE_CMP3, 0b11111110, I_CMP },
+
+    { OPCODE_JE,   0b11111111, I_JE },
+    { OPCODE_JL,   0b11111111, I_JL },
+    { OPCODE_JLE,  0b11111111, I_JLE },
+    { OPCODE_JB,   0b11111111, I_JB },
+    { OPCODE_JBE,  0b11111111, I_JBE },
+    { OPCODE_JP,   0b11111111, I_JP },
+    { OPCODE_JO,   0b11111111, I_JO },
+    { OPCODE_JS,   0b11111111, I_JS },
+    { OPCODE_JNE,  0b11111111, I_JNE },
+    { OPCODE_JNL,  0b11111111, I_JNL },
+    { OPCODE_JNLE, 0b11111111, I_JNLE },
+    { OPCODE_JNB,  0b11111111, I_JNB },
+    { OPCODE_JNBE, 0b11111111, I_JNBE },
+    { OPCODE_JNP,  0b11111111, I_JNP },
+    { OPCODE_JNO,  0b11111111, I_JNO },
+    { OPCODE_JNS,  0b11111111, I_JNS },
+    { OPCODE_LOOP, 0b11111111, I_LOOP },
+    { OPCODE_LOOPZ, 0b11111111, I_LOOPZ },
+    { OPCODE_LOOPNZ, 0b11111111, I_LOOPNZ },
+    { OPCODE_JCXZ, 0b11111111, I_JCXZ },
+
+    { OPCODE_IMM_TO_REG_MEM, 0b11111100, I_NOOP },
 };
+
+char const *register_names[] =
+{
+    "al", "cl", "dl", "bl", "ah", "ch", "dh", "bh",
+    "ax", "cx", "dx", "bx", "sp", "bp", "si", "di",
+};
+
+char const *instruction_names[] =
+{
+    "NOOP",
+    "MOV", "ADD", "SUB",
+    "CMP",
+    "JE", "JL", "JLE", "JB",
+    "JBE",
+    "JP",
+    "JO",
+    "JS",
+    "JNE",
+    "JNL",
+    "JNLE",
+    "JNB",
+    "JNBE",
+    "JNP",
+    "JNO",
+    "JNS",
+    "LOOP",
+    "LOOPZ",
+    "LOOPNZ",
+    "JCXZ",
+};
+
+void print_ea(effective_address ea)
+{
+    if (ea.reg_count == 0)
+    {
+        printf("[%d]", ea.displacement);
+    }
+    else if (ea.reg_count == 1)
+    {
+        printf("[%s", register_names[ea.reg1 | 0b1000]);
+        if (ea.displacement == 0)
+        {
+            printf("]");
+        }
+        else
+        {
+            printf(" + %d]", ea.displacement);
+        }
+    }
+    else if (ea.reg_count == 2)
+    {
+        printf("[%s + %s", register_names[ea.reg1 | 0b1000],
+            register_names[ea.reg2 | 0b1000]);
+        if (ea.displacement == 0)
+        {
+            printf("]");
+        }
+        else
+        {
+            printf(" + %d]", ea.displacement);
+        }
+    }
+}
+
+void print_instruction_operand(instruction_operand iop)
+{
+    switch (iop.tag)
+    {
+    case IOPERAND_NONE: break;
+    case IOPERAND_IMMEDIATE: printf("%d", iop.imm); break;
+    case IOPERAND_REGISTER: printf("%s", register_names[iop.reg]); break;
+    case IOPERAND_ADDRESS: print_ea(iop.addr); break;
+    }
+}
+
+void print_instruction(instruction i)
+{
+    printf("    %s ", instruction_names[i.tag]);
+    print_instruction_operand(i.destination);
+    if (i.source.tag != IOPERAND_NONE)
+    {
+        printf(", ");
+        print_instruction_operand(i.source);
+    }
+    printf("\n");
+}
 
 typedef struct
 {
@@ -252,7 +335,6 @@ typedef struct
     uint32 size;
     uint32 index;
 } memory_buffer;
-
 
 effective_address ea_table[8] =
 {
@@ -295,41 +377,6 @@ effective_address read_ea(memory_buffer *buffer, int32 mod, int32 r_m)
     return ea;
 }
 
-
-void print_eac(effective_address ea)
-{
-    if (ea.reg_count == 0)
-    {
-        printf("[%d]", ea.displacement);
-    }
-    else if (ea.reg_count == 1)
-    {
-        printf("[%s", register_names[ea.reg1][1]);
-        if (ea.displacement == 0)
-        {
-            printf("]");
-        }
-        else
-        {
-            printf(" + %d]", ea.displacement);
-        }
-    }
-    else if (ea.reg_count == 2)
-    {
-        printf("[%s + %s", register_names[ea.reg1][1],
-            register_names[ea.reg2][1]);
-        if (ea.displacement == 0)
-        {
-            printf("]");
-        }
-        else
-        {
-            printf(" + %d]", ea.displacement);
-        }
-    }
-}
-
-
 int32 read_data_bytes(memory_buffer *buffer, int32 w, int32 s)
 {
     int32 data = (!s && w) ? *(int16 *) (buffer->data + buffer->index)
@@ -339,7 +386,7 @@ int32 read_data_bytes(memory_buffer *buffer, int32 w, int32 s)
 }
 
 
-void instruction_type1(memory_buffer *buffer, opcode_info *info)
+instruction instruction_type1(memory_buffer *buffer, opcode_info *info)
 {
     uint8 byte1 = buffer->data[buffer->index++];
     uint8 byte2 = buffer->data[buffer->index++];
@@ -351,88 +398,40 @@ void instruction_type1(memory_buffer *buffer, opcode_info *info)
     int32 reg = (0b00111000 & byte2) >> 3;
     int32 r_m = (0b00000111 & byte2);
 
+    instruction result =
+    {
+        .tag = info->instruction,
+        .source =
+        {
+            .tag = IOPERAND_REGISTER,
+            .reg = reg | (w << 3),
+        },
+    };
+
     if (mod == MOD_RM)
     {
-        if (d)
-        {
-            printf("    %s %s, %s\n", info->name, register_names[reg][w], register_names[r_m][w]);
-        }
-        else
-        {
-            printf("    %s %s, %s\n", info->name, register_names[r_m][w], register_names[reg][w]);
-        }
+        result.destination = (instruction_operand){ .tag = IOPERAND_REGISTER, .reg = r_m | (w << 3) };
     }
     else
     {
-        effective_address ea = read_ea(buffer, mod, r_m);
-        (void) ea;
-
-        printf("    %s ", info->name);
-
-        if (d)
+        result.destination = (instruction_operand)
         {
-            printf("%s, ", register_names[reg][w]);
-        }
-
-        if (ea.reg_count == 0)
-        {
-            printf("[%d]", ea.displacement);
-        }
-        else if (ea.reg_count == 1)
-        {
-            printf("[%s", register_names[ea.reg1][1]);
-            if (ea.displacement == 0)
-            {
-                printf("]");
-            }
-            else
-            {
-                printf(" + %d]", ea.displacement);
-            }
-        }
-        else if (ea.reg_count == 2)
-        {
-            printf("[%s + %s", register_names[ea.reg1][1],
-                register_names[ea.reg2][1]);
-            if (ea.displacement == 0)
-            {
-                printf("]");
-            }
-            else
-            {
-                printf(" + %d]", ea.displacement);
-            }
-        }
-
-        if (!d)
-        {
-            printf(", %s", register_names[reg][w]);
-        }
-
-        printf("\n");
+            .tag = IOPERAND_ADDRESS,
+            .addr = read_ea(buffer, mod, r_m),
+        };
     }
+
+    if (d)
+    {
+        instruction_operand tmp = result.destination;
+        result.destination = result.source;
+        result.source = tmp;
+    }
+
+    return result;
 }
 
-
-void instruction_mov_imm_to_reg_mem(memory_buffer *buffer, opcode_info *info)
-{
-    uint8 byte1 = buffer->data[buffer->index++];
-    uint8 byte2 = buffer->data[buffer->index++];
-
-    int32 w = 0b00000001 & byte1;
-
-    int32 mod = (0b11000000 & byte2) >> 6;
-    int32 r_m = (0b00000111 & byte2);
-
-    effective_address ea = read_ea(buffer, mod, r_m);
-    (void) ea;
-
-    int32 data = read_data_bytes(buffer, w, 0);
-    (void) data;
-}
-
-
-void instruction_imm_to_reg(memory_buffer *buffer, opcode_info *info)
+instruction instruction_imm_to_reg(memory_buffer *buffer, opcode_info *info)
 {
     uint8 byte1 = buffer->data[buffer->index++];
 
@@ -441,7 +440,22 @@ void instruction_imm_to_reg(memory_buffer *buffer, opcode_info *info)
 
     int32 data = read_data_bytes(buffer, w, 0);
 
-    printf("    %s %s, %d\n", info->name, register_names[reg][w], (int) data);
+    instruction result =
+    {
+        .tag = info->instruction,
+        .source =
+        {
+            .tag = IOPERAND_IMMEDIATE,
+            .imm = data,
+        },
+        .destination =
+        {
+            .tag = IOPERAND_REGISTER,
+            .reg = reg | (w << 3),
+        }
+    };
+
+    return result;
 }
 
 
@@ -452,15 +466,17 @@ void mov45(memory_buffer *buffer, opcode_info *info, bool reverse_order)
     int32 w = 0b00000001 & byte1;
 
     int32 addr = read_data_bytes(buffer, w, 0);
+    (void) addr;
 
-    if (reverse_order)
-        printf("    %s [%d], ax\n", info->name, addr);
-    else
-        printf("    %s ax, [%d]\n", info->name, addr);
+    // @todo:
+    // if (reverse_order)
+    //     printf("    %s [%d], ax\n", instruction_names[info->instruction], addr);
+    // else
+    //     printf("    %s ax, [%d]\n", instruction_names[info->instruction], addr);
 }
 
 
-void instruction_imm_to_reg_mem(memory_buffer *buffer, opcode_info *info)
+instruction instruction_imm_to_reg_mem(memory_buffer *buffer, opcode_info *info)
 {
     uint8 byte1 = buffer->data[buffer->index++];
     uint8 byte2 = buffer->data[buffer->index++];
@@ -472,11 +488,13 @@ void instruction_imm_to_reg_mem(memory_buffer *buffer, opcode_info *info)
     int32 opc = (0b00111000 & byte2) >> 3;
     int32 r_m = (0b00000111 & byte2);
 
+    instruction result = {};
+
     switch (opc)
     {
-    case 0b000: printf("    add"); break;
-    case 0b101: printf("    sub"); break;
-    case 0b111: printf("    cmp"); break;
+    case 0b000: result.tag = I_ADD; break;
+    case 0b101: result.tag = I_SUB; break;
+    case 0b111: result.tag = I_CMP; break;
     default:
         printf("unknown sub_opcode\n");
         exit(1);
@@ -484,37 +502,70 @@ void instruction_imm_to_reg_mem(memory_buffer *buffer, opcode_info *info)
 
     if (mod == MOD_RM)
     {
-        printf(" %s", register_names[r_m][w]);
+        result.destination = (instruction_operand)
+        {
+            .tag = IOPERAND_REGISTER,
+            .reg = r_m | (w << 3),
+        };
     }
     else
     {
-        printf(" ");
-        effective_address ea = read_ea(buffer, mod, r_m);
-        print_eac(ea);
+        result.destination = (instruction_operand)
+        {
+            .tag = IOPERAND_ADDRESS,
+            .addr = read_ea(buffer, mod, r_m),
+        };
     }
 
-    int32 data = read_data_bytes(buffer, w, s);
-    printf(", %d\n", data);
+    result.source = (instruction_operand)
+    {
+        .tag = IOPERAND_IMMEDIATE,
+        .imm = read_data_bytes(buffer, w, s),
+    };
+
+    return result;
 }
 
 
-void instruction_imm_to_acc(memory_buffer *buffer, opcode_info *info)
+instruction instruction_imm_to_acc(memory_buffer *buffer, opcode_info *info)
 {
     uint8 byte1 = buffer->data[buffer->index++];
 
     int32 w = 0b00000001 & byte1;
     int32 data = read_data_bytes(buffer, w, 0);
 
-    printf("    %s %s, %d\n", info->name, w ? "ax" : "al", (int) data);
+    instruction result =
+    {
+        .tag = info->instruction,
+        .source =
+        {
+            .tag = IOPERAND_IMMEDIATE,
+            .imm = data,
+        },
+        .destination =
+        {
+            .tag = IOPERAND_REGISTER,
+            .reg = w << 3,
+        }
+    };
+    return result;
 }
 
-
-void instruction_jumps(memory_buffer *buffer, opcode_info *info)
+instruction instruction_jumps(memory_buffer *buffer, opcode_info *info)
 {
     buffer->index++; // first byte is fully opcode
     int8 ip_inc8 = buffer->data[buffer->index++];
 
-    printf("    %s %d\n", info->name, (int) ip_inc8);
+    instruction result =
+    {
+        .tag = info->instruction,
+        .destination =
+        {
+            .tag = IOPERAND_IMMEDIATE,
+            .imm = ip_inc8,
+        },
+    };
+    return result;
 }
 
 
@@ -589,22 +640,24 @@ int main()
         // print_binary8(info.opcode);
         // printf("\n");
 
+        instruction instr = { .tag = I_NOOP };
+
         switch (info.opcode)
         {
-        case OPCODE_MOV1: instruction_type1(&buffer, &info); break;
-        case OPCODE_MOV2: instruction_mov_imm_to_reg_mem(&buffer, &info); break;
-        case OPCODE_MOV3: instruction_imm_to_reg(&buffer, &info); break;
+        case OPCODE_MOV1: instr = instruction_type1(&buffer, &info); break;
+        // case OPCODE_MOV2: instruction_mov_imm_to_reg_mem(&buffer, &info); break;
+        case OPCODE_MOV3: instr = instruction_imm_to_reg(&buffer, &info); break;
         case OPCODE_MOV4: mov45(&buffer, &info, false); break;
         case OPCODE_MOV5: mov45(&buffer, &info, true); break;
 
-        case OPCODE_ADD1: instruction_type1(&buffer, &info); break;
-        case OPCODE_ADD3: instruction_imm_to_acc(&buffer, &info); break;
+        case OPCODE_ADD1: instr = instruction_type1(&buffer, &info); break;
+        case OPCODE_ADD3: instr = instruction_imm_to_acc(&buffer, &info); break;
 
-        case OPCODE_SUB1: instruction_type1(&buffer, &info); break;
-        case OPCODE_SUB3: instruction_imm_to_acc(&buffer, &info); break;
+        case OPCODE_SUB1: instr = instruction_type1(&buffer, &info); break;
+        case OPCODE_SUB3: instr = instruction_imm_to_acc(&buffer, &info); break;
 
-        case OPCODE_CMP1: instruction_type1(&buffer, &info); break;
-        case OPCODE_CMP3: instruction_imm_to_acc(&buffer, &info); break;
+        case OPCODE_CMP1: instr = instruction_type1(&buffer, &info); break;
+        case OPCODE_CMP3: instr = instruction_imm_to_acc(&buffer, &info); break;
 
         case OPCODE_JE:
         case OPCODE_JL:
@@ -626,16 +679,18 @@ int main()
         case OPCODE_LOOPZ:
         case OPCODE_LOOPNZ:
         case OPCODE_JCXZ:
-            instruction_jumps(&buffer, &info);
+            instr = instruction_jumps(&buffer, &info);
             break;
 
         case OPCODE_IMM_TO_REG_MEM:
-            instruction_imm_to_reg_mem(&buffer, &info); break;
+            instr = instruction_imm_to_reg_mem(&buffer, &info); break;
 
         default:
             printf("Don't know what to do!\n");
             exit(1);
         }
+
+        print_instruction(instr);
     }
 
 
