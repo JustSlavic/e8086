@@ -54,9 +54,6 @@ void print_binary32(uint32 n)
     di - destination index
 */
 
-// @note: only first 6 bits are meaningful
-int opcode_mask = 0b11111100;
-
 enum opcode
 {
     OPCODE_MOV1 = 0b10001000, // mov (register/memory to/from register)
@@ -102,10 +99,10 @@ enum opcode
 
 enum
 {
-    MOD_MM   = 0,
-    MOD_MM8  = 1,
-    MOD_MM16 = 2,
-    MOD_RM   = 3,
+    MOD_MM   = 0b00,
+    MOD_MM8  = 0b01,
+    MOD_MM16 = 0b10,
+    MOD_RM   = 0b11,
 };
 
 typedef struct
@@ -158,6 +155,85 @@ opcode_info opcode_table[] =
     { OPCODE_IMM_TO_REG_MEM, 0b11111100, "???" },
 };
 
+enum
+{
+    REGISTER_AL = 0b0000000000000001,
+    REGISTER_AH = 0b0000000000000010,
+    REGISTER_AX = REGISTER_AH | REGISTER_AL,
+
+    REGISTER_BL = 0b0000000000000100,
+    REGISTER_BH = 0b0000000000001000,
+    REGISTER_BX = REGISTER_BH | REGISTER_BL,
+
+    REGISTER_CL = 0b0000000000010000,
+    REGISTER_CH = 0b0000000000100000,
+    REGISTER_CX = REGISTER_CH | REGISTER_CL,
+
+    REGISTER_DL = 0b0000000001000000,
+    REGISTER_DH = 0b0000000010000000,
+    REGISTER_DX = REGISTER_DH | REGISTER_DL,
+
+    REGISTER_SP = 0b0000000100000000,
+    REGISTER_BP = 0b0000001000000000,
+    REGISTER_SI = 0b0000010000000000,
+    REGISTER_DI = 0b0000100000000000,
+};
+
+typedef struct
+{
+    union { uint16 ax; struct { uint8 al, ah; }; };
+    union { uint16 bx; struct { uint8 bl, bh; }; };
+    union { uint16 cx; struct { uint8 cl, ch; }; };
+    union { uint16 dx; struct { uint8 dl, dh; }; };
+    uint16 sp;
+    uint16 bp;
+    uint16 si;
+    uint16 di;
+} registers;
+
+typedef enum
+{
+    I_NONE,
+
+    I_MOV,
+    I_ADD,
+    I_SUB,
+} instruction_tag;
+
+typedef enum
+{
+    IOPERAND_NONE,
+
+    IOPERAND_IMMEDIATE,
+    IOPERAND_REGISTER,
+    IOPERAND_ADDRESS,
+} instruction_operand_tag;
+
+typedef struct
+{
+    uint32 reg1, reg2;
+    uint32 reg_count; // 0, 1, or 2
+    uint32 displacement;
+} effective_address;
+
+typedef struct
+{
+    instruction_operand_tag tag;
+    union
+    {
+        int32 imm;
+        int32 reg;
+        effective_address addr;
+    };
+} instruction_operand;
+
+typedef struct
+{
+    instruction_tag tag;
+
+    instruction_operand source, destination;
+} instruction;
+
 char const *register_names[8][2] =
 {
     { "al", "ax" }, // 0
@@ -177,15 +253,8 @@ typedef struct
     uint32 index;
 } memory_buffer;
 
-typedef struct
-{
-    uint32 reg1, reg2;
-    uint32 reg_count; // 0, 1, or 2
-    uint32 displacement;
-} effective_address_calculation;
 
-
-effective_address_calculation eac_table[8] =
+effective_address ea_table[8] =
 {
     { .reg1 = 3, .reg2 = 6, .reg_count = 2 }, // (bx + si + displacement)
     { .reg1 = 3, .reg2 = 7, .reg_count = 2 }, // (bx + di + displacement)
@@ -198,64 +267,64 @@ effective_address_calculation eac_table[8] =
 };
 
 
-effective_address_calculation read_eac(memory_buffer *buffer, int32 mod, int32 r_m)
+effective_address read_ea(memory_buffer *buffer, int32 mod, int32 r_m)
 {
-    effective_address_calculation eac = eac_table[r_m];
+    effective_address ea = ea_table[r_m];
 
     if (mod == MOD_MM)
     {
         // Direct address reading
         if (r_m == 0b110)
         {
-            eac.reg_count = 0;
-            eac.displacement = *(int16 *) (buffer->data + buffer->index);
+            ea.reg_count = 0;
+            ea.displacement = *(int16 *) (buffer->data + buffer->index);
             buffer->index += 2;
         }
     }
     else if (mod == MOD_MM8)
     {
-        eac.displacement = *(int8 *) (buffer->data + buffer->index);
+        ea.displacement = *(int8 *) (buffer->data + buffer->index);
         buffer->index += 1;
     }
     else if (mod == MOD_MM16)
     {
-        eac.displacement = *(int16 *) (buffer->data + buffer->index);
+        ea.displacement = *(int16 *) (buffer->data + buffer->index);
         buffer->index += 2;
     }
 
-    return eac;
+    return ea;
 }
 
 
-void print_eac(effective_address_calculation eac)
+void print_eac(effective_address ea)
 {
-    if (eac.reg_count == 0)
+    if (ea.reg_count == 0)
     {
-        printf("[%d]", eac.displacement);
+        printf("[%d]", ea.displacement);
     }
-    else if (eac.reg_count == 1)
+    else if (ea.reg_count == 1)
     {
-        printf("[%s", register_names[eac.reg1][1]);
-        if (eac.displacement == 0)
+        printf("[%s", register_names[ea.reg1][1]);
+        if (ea.displacement == 0)
         {
             printf("]");
         }
         else
         {
-            printf(" + %d]", eac.displacement);
+            printf(" + %d]", ea.displacement);
         }
     }
-    else if (eac.reg_count == 2)
+    else if (ea.reg_count == 2)
     {
-        printf("[%s + %s", register_names[eac.reg1][1],
-            register_names[eac.reg2][1]);
-        if (eac.displacement == 0)
+        printf("[%s + %s", register_names[ea.reg1][1],
+            register_names[ea.reg2][1]);
+        if (ea.displacement == 0)
         {
             printf("]");
         }
         else
         {
-            printf(" + %d]", eac.displacement);
+            printf(" + %d]", ea.displacement);
         }
     }
 }
@@ -295,8 +364,8 @@ void instruction_type1(memory_buffer *buffer, opcode_info *info)
     }
     else
     {
-        effective_address_calculation eac = read_eac(buffer, mod, r_m);
-        (void) eac;
+        effective_address ea = read_ea(buffer, mod, r_m);
+        (void) ea;
 
         printf("    %s ", info->name);
 
@@ -305,33 +374,33 @@ void instruction_type1(memory_buffer *buffer, opcode_info *info)
             printf("%s, ", register_names[reg][w]);
         }
 
-        if (eac.reg_count == 0)
+        if (ea.reg_count == 0)
         {
-            printf("[%d]", eac.displacement);
+            printf("[%d]", ea.displacement);
         }
-        else if (eac.reg_count == 1)
+        else if (ea.reg_count == 1)
         {
-            printf("[%s", register_names[eac.reg1][1]);
-            if (eac.displacement == 0)
+            printf("[%s", register_names[ea.reg1][1]);
+            if (ea.displacement == 0)
             {
                 printf("]");
             }
             else
             {
-                printf(" + %d]", eac.displacement);
+                printf(" + %d]", ea.displacement);
             }
         }
-        else if (eac.reg_count == 2)
+        else if (ea.reg_count == 2)
         {
-            printf("[%s + %s", register_names[eac.reg1][1],
-                register_names[eac.reg2][1]);
-            if (eac.displacement == 0)
+            printf("[%s + %s", register_names[ea.reg1][1],
+                register_names[ea.reg2][1]);
+            if (ea.displacement == 0)
             {
                 printf("]");
             }
             else
             {
-                printf(" + %d]", eac.displacement);
+                printf(" + %d]", ea.displacement);
             }
         }
 
@@ -355,8 +424,8 @@ void instruction_mov_imm_to_reg_mem(memory_buffer *buffer, opcode_info *info)
     int32 mod = (0b11000000 & byte2) >> 6;
     int32 r_m = (0b00000111 & byte2);
 
-    effective_address_calculation eac = read_eac(buffer, mod, r_m);
-    (void) eac;
+    effective_address ea = read_ea(buffer, mod, r_m);
+    (void) ea;
 
     int32 data = read_data_bytes(buffer, w, 0);
     (void) data;
@@ -420,8 +489,8 @@ void instruction_imm_to_reg_mem(memory_buffer *buffer, opcode_info *info)
     else
     {
         printf(" ");
-        effective_address_calculation eac = read_eac(buffer, mod, r_m);
-        print_eac(eac);
+        effective_address ea = read_ea(buffer, mod, r_m);
+        print_eac(ea);
     }
 
     int32 data = read_data_bytes(buffer, w, s);
