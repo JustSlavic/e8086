@@ -1,6 +1,6 @@
 #!/bin/bash
 
-C_FLAGS="-std=c11"
+C_FLAGS="-std=c11 -g"
 WARNINGS="-Wall -Werror"
 DEFINES=""
 

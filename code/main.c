@@ -554,6 +554,33 @@ instruction instruction_jumps(memory_buffer *buffer, opcode_info *info)
     return result;
 }
 
+void choose_register(registers *rs, int32 reg, void **d, int32 *w)
+{
+    switch (reg)
+    {
+    case R_AL: *d = &rs->al; break;
+    case R_AH: *d = &rs->ah; break;
+    case R_AX: *d = &rs->ax; *w = 1; break;
+
+    case R_BL: *d = &rs->bl; break;
+    case R_BH: *d = &rs->bh; break;
+    case R_BX: *d = &rs->bx; *w = 1; break;
+
+    case R_CL: *d = &rs->cl; break;
+    case R_CH: *d = &rs->ch; break;
+    case R_CX: *d = &rs->cx; *w = 1; break;
+
+    case R_DL: *d = &rs->dl; break;
+    case R_DH: *d = &rs->dh; break;
+    case R_DX: *d = &rs->dx; *w = 1; break;
+
+    case R_BP: *d = &rs->bp; *w = 1; break;
+    case R_SP: *d = &rs->sp; *w = 1; break;
+    case R_DI: *d = &rs->di; *w = 1; break;
+    case R_SI: *d = &rs->si; *w = 1; break;
+    }
+}
+
 void execute_mov(registers *rs, instruction i)
 {
     void *s = 0;
@@ -562,39 +589,25 @@ void execute_mov(registers *rs, instruction i)
 
     if (i.destination.tag == IOP_REG)
     {
-        switch (i.destination.reg)
-        {
-        case R_AL: d = &rs->al; break;
-        case R_AH: d = &rs->ah; break;
-        case R_AX: d = &rs->ax; w = 1; break;
-
-        case R_BL: d = &rs->bl; break;
-        case R_BH: d = &rs->bh; break;
-        case R_BX: d = &rs->bx; w = 1; break;
-
-        case R_CL: d = &rs->cl; break;
-        case R_CH: d = &rs->ch; break;
-        case R_CX: d = &rs->cx; w = 1; break;
-
-        case R_DL: d = &rs->dl; break;
-        case R_DH: d = &rs->dh; break;
-        case R_DX: d = &rs->dx; w = 1; break;
-
-        case R_BP: d = &rs->bp; w = 1; break;
-        case R_SP: d = &rs->sp; w = 1; break;
-        case R_DI: d = &rs->di; w = 1; break;
-        case R_SI: d = &rs->si; w = 1; break;
-        }
+        choose_register(rs, i.destination.reg, &d, &w);
     }
 
     if (i.source.tag == IOP_IMM)
     {
         s = &i.source.imm;
     }
+    else if (i.source.tag == IOP_REG)
+    {
+        choose_register(rs, i.source.reg, &s, &w);
+    }
 
     if (w)
     {
         *(uint16 *) d = *(uint16 *) s;
+    }
+    else
+    {
+        *(uint8 *) d = *(uint8 *) s;
     }
 }
 
