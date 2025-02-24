@@ -137,22 +137,8 @@ typedef enum
     I_SUB,
 
     I_CMP,
-    I_JE,
-    I_JL,
-    I_JLE,
-    I_JB,
-    I_JBE,
-    I_JP,
-    I_JO,
-    I_JS,
-    I_JNE,
-    I_JNL,
-    I_JNLE,
-    I_JNB,
-    I_JNBE,
-    I_JNP,
-    I_JNO,
-    I_JNS,
+    I_JE,  I_JL,  I_JLE,  I_JB,  I_JBE,  I_JP,  I_JO,  I_JS,
+    I_JNE, I_JNL, I_JNLE, I_JNB, I_JNBE, I_JNP, I_JNO, I_JNS,
     I_LOOP,
     I_LOOPZ,
     I_LOOPNZ,
@@ -163,9 +149,9 @@ typedef enum
 {
     IOPERAND_NONE,
 
-    IOPERAND_IMMEDIATE,
-    IOPERAND_REGISTER,
-    IOPERAND_ADDRESS,
+    IOP_IMM,
+    IOP_REG,
+    IOP_MEM,
 } instruction_operand_tag;
 
 typedef struct
@@ -311,9 +297,9 @@ void print_instruction_operand(instruction_operand iop)
     switch (iop.tag)
     {
     case IOPERAND_NONE: break;
-    case IOPERAND_IMMEDIATE: printf("%d", iop.imm); break;
-    case IOPERAND_REGISTER: printf("%s", register_names[iop.reg]); break;
-    case IOPERAND_ADDRESS: print_ea(iop.addr); break;
+    case IOP_IMM: printf("%d", iop.imm); break;
+    case IOP_REG: printf("%s", register_names[iop.reg]); break;
+    case IOP_MEM: print_ea(iop.addr); break;
     }
 }
 
@@ -403,20 +389,20 @@ instruction instruction_type1(memory_buffer *buffer, opcode_info *info)
         .tag = info->instruction,
         .source =
         {
-            .tag = IOPERAND_REGISTER,
+            .tag = IOP_REG,
             .reg = reg | (w << 3),
         },
     };
 
     if (mod == MOD_RM)
     {
-        result.destination = (instruction_operand){ .tag = IOPERAND_REGISTER, .reg = r_m | (w << 3) };
+        result.destination = (instruction_operand){ .tag = IOP_REG, .reg = r_m | (w << 3) };
     }
     else
     {
         result.destination = (instruction_operand)
         {
-            .tag = IOPERAND_ADDRESS,
+            .tag = IOP_MEM,
             .addr = read_ea(buffer, mod, r_m),
         };
     }
@@ -435,7 +421,7 @@ instruction instruction_imm_to_reg(memory_buffer *buffer, opcode_info *info)
 {
     uint8 byte1 = buffer->data[buffer->index++];
 
-    int32 w = 0b00001000 & byte1;
+    int32 w = (0b00001000 & byte1) >> 3;
     int32 reg = 0b00000111 & byte1;
 
     int32 data = read_data_bytes(buffer, w, 0);
@@ -445,12 +431,12 @@ instruction instruction_imm_to_reg(memory_buffer *buffer, opcode_info *info)
         .tag = info->instruction,
         .source =
         {
-            .tag = IOPERAND_IMMEDIATE,
+            .tag = IOP_IMM,
             .imm = data,
         },
         .destination =
         {
-            .tag = IOPERAND_REGISTER,
+            .tag = IOP_REG,
             .reg = reg | (w << 3),
         }
     };
@@ -459,7 +445,7 @@ instruction instruction_imm_to_reg(memory_buffer *buffer, opcode_info *info)
 }
 
 
-void mov45(memory_buffer *buffer, opcode_info *info, bool reverse_order)
+void mov_memory_and_accumulator(memory_buffer *buffer, opcode_info *info, bool reverse_order)
 {
     uint8 byte1 = buffer->data[buffer->index++];
 
@@ -504,7 +490,7 @@ instruction instruction_imm_to_reg_mem(memory_buffer *buffer, opcode_info *info)
     {
         result.destination = (instruction_operand)
         {
-            .tag = IOPERAND_REGISTER,
+            .tag = IOP_REG,
             .reg = r_m | (w << 3),
         };
     }
@@ -512,14 +498,14 @@ instruction instruction_imm_to_reg_mem(memory_buffer *buffer, opcode_info *info)
     {
         result.destination = (instruction_operand)
         {
-            .tag = IOPERAND_ADDRESS,
+            .tag = IOP_MEM,
             .addr = read_ea(buffer, mod, r_m),
         };
     }
 
     result.source = (instruction_operand)
     {
-        .tag = IOPERAND_IMMEDIATE,
+        .tag = IOP_IMM,
         .imm = read_data_bytes(buffer, w, s),
     };
 
@@ -539,12 +525,12 @@ instruction instruction_imm_to_acc(memory_buffer *buffer, opcode_info *info)
         .tag = info->instruction,
         .source =
         {
-            .tag = IOPERAND_IMMEDIATE,
+            .tag = IOP_IMM,
             .imm = data,
         },
         .destination =
         {
-            .tag = IOPERAND_REGISTER,
+            .tag = IOP_REG,
             .reg = w << 3,
         }
     };
@@ -561,17 +547,113 @@ instruction instruction_jumps(memory_buffer *buffer, opcode_info *info)
         .tag = info->instruction,
         .destination =
         {
-            .tag = IOPERAND_IMMEDIATE,
+            .tag = IOP_IMM,
             .imm = ip_inc8,
         },
     };
     return result;
 }
 
-
-int main()
+void execute_mov(registers *rs, instruction i)
 {
-    char const *filename = "computer_enhance/perfaware/part1/listing_0041_add_sub_cmp_jnz";
+    void *s = 0;
+    void *d = 0;
+    int32 w = 0;
+
+    if (i.destination.tag == IOP_REG)
+    {
+        switch (i.destination.reg)
+        {
+        case R_AL: d = &rs->al; break;
+        case R_AH: d = &rs->ah; break;
+        case R_AX: d = &rs->ax; w = 1; break;
+
+        case R_BL: d = &rs->bl; break;
+        case R_BH: d = &rs->bh; break;
+        case R_BX: d = &rs->bx; w = 1; break;
+
+        case R_CL: d = &rs->cl; break;
+        case R_CH: d = &rs->ch; break;
+        case R_CX: d = &rs->cx; w = 1; break;
+
+        case R_DL: d = &rs->dl; break;
+        case R_DH: d = &rs->dh; break;
+        case R_DX: d = &rs->dx; w = 1; break;
+
+        case R_BP: d = &rs->bp; w = 1; break;
+        case R_SP: d = &rs->sp; w = 1; break;
+        case R_DI: d = &rs->di; w = 1; break;
+        case R_SI: d = &rs->si; w = 1; break;
+        }
+    }
+
+    if (i.source.tag == IOP_IMM)
+    {
+        s = &i.source.imm;
+    }
+
+    if (w)
+    {
+        *(uint16 *) d = *(uint16 *) s;
+    }
+}
+
+void execute_instruction(registers *rs, instruction i)
+{
+    switch (i.tag)
+    {
+    case I_MOV: execute_mov(rs, i); break;
+    default: printf("Cannot execute given instruction!\n");
+    }
+}
+
+void print_out_compound_register_state(uint16 rx)
+{
+    uint8 rl = rx >> 8;
+    uint8 rh = rx & (0xff);
+    print_binary8(rl);
+    printf(" ");
+    print_binary8(rh);
+    printf(" (%d|%d; %d)", rl, rh, rx);
+}
+
+void print_out_registers_state(registers *rs)
+{
+    printf("Registers:\n"
+           "    AX: ");
+    print_out_compound_register_state(rs->ax);
+    printf("\n");
+    printf("    BX: ");
+    print_out_compound_register_state(rs->bx);
+    printf("\n");
+    printf("    CX: ");
+    print_out_compound_register_state(rs->cx);
+    printf("\n");
+    printf("    DX: ");
+    print_out_compound_register_state(rs->dx);
+    printf("\n");
+    printf("    SP: ");
+    print_binary16(rs->sp);
+    printf(" (%d)\n", rs->sp);
+    printf("    BP: ");
+    print_binary16(rs->bp);
+    printf(" (%d)\n", rs->bp);
+    printf("    SI: ");
+    print_binary16(rs->si);
+    printf(" (%d)\n", rs->si);
+    printf("    DI: ");
+    print_binary16(rs->di);
+    printf(" (%d)\n", rs->di);
+}
+
+int main(int argc, char **argv)
+{
+    if (argc < 2)
+    {
+        printf("e8086 <binary_input> \n");
+        return 1;
+    }
+    char const *filename = argv[1];
 
     FILE *f = fopen(filename, "r");
     if (!f) {
@@ -593,6 +675,8 @@ int main()
     // printf("\n\n");
 
     fprintf(stdout, "; read %zu bytes\nbits 16\n", n);
+
+    registers rs = {};
 
     while (buffer.index < n)
     {
@@ -647,8 +731,8 @@ int main()
         case OPCODE_MOV1: instr = instruction_type1(&buffer, &info); break;
         // case OPCODE_MOV2: instruction_mov_imm_to_reg_mem(&buffer, &info); break;
         case OPCODE_MOV3: instr = instruction_imm_to_reg(&buffer, &info); break;
-        case OPCODE_MOV4: mov45(&buffer, &info, false); break;
-        case OPCODE_MOV5: mov45(&buffer, &info, true); break;
+        case OPCODE_MOV4: mov_memory_and_accumulator(&buffer, &info, false); break;
+        case OPCODE_MOV5: mov_memory_and_accumulator(&buffer, &info, true); break;
 
         case OPCODE_ADD1: instr = instruction_type1(&buffer, &info); break;
         case OPCODE_ADD3: instr = instruction_imm_to_acc(&buffer, &info); break;
@@ -691,8 +775,10 @@ int main()
         }
 
         print_instruction(instr);
+        execute_instruction(&rs, instr);
     }
 
+    print_out_registers_state(&rs);
 
     return 0;
 }
