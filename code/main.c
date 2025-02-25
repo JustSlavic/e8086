@@ -126,6 +126,8 @@ typedef struct
     uint16 bp;
     uint16 si;
     uint16 di;
+    bool fz;
+    bool fs;
 } registers;
 
 typedef enum
@@ -581,41 +583,48 @@ void choose_register(registers *rs, int32 reg, void **d, int32 *w)
     }
 }
 
-void execute_mov(registers *rs, instruction i)
+#define EXECUTE_INSTRUCTION(INSTR) do { \
+    if (w) { \
+        ASSIGN(INSTR, uint16); \
+        UPDATE_FLAGS(uint16); \
+    } else { \
+        ASSIGN(INSTR, uint8); \
+        UPDATE_FLAGS(uint8); \
+    }} while (false)
+
+void execute_instruction(registers *rs, instruction i)
 {
     void *s = 0;
     void *d = 0;
     int32 w = 0;
 
-    if (i.destination.tag == IOP_REG)
-    {
-        choose_register(rs, i.destination.reg, &d, &w);
-    }
+    if (i.destination.tag == IOP_REG) choose_register(rs, i.destination.reg, &d, &w);
+    if (i.source.tag == IOP_IMM) s = &i.source.imm;
+    else if (i.source.tag == IOP_REG) choose_register(rs, i.source.reg, &s, &w);
 
-    if (i.source.tag == IOP_IMM)
-    {
-        s = &i.source.imm;
-    }
-    else if (i.source.tag == IOP_REG)
-    {
-        choose_register(rs, i.source.reg, &s, &w);
-    }
-
-    if (w)
-    {
-        *(uint16 *) d = *(uint16 *) s;
-    }
-    else
-    {
-        *(uint8 *) d = *(uint8 *) s;
-    }
-}
-
-void execute_instruction(registers *rs, instruction i)
-{
     switch (i.tag)
     {
-    case I_MOV: execute_mov(rs, i); break;
+#define ASSIGN(INSTR, TYPE) *(TYPE *) d INSTR *(TYPE *) s;
+#define UPDATE_FLAGS(TYPE)
+
+    case I_MOV: EXECUTE_INSTRUCTION(=);  break;
+
+#undef UPDATE_FLAGS
+#define UPDATE_FLAGS(TYPE) \
+    TYPE n = *(TYPE *) d; \
+    rs->fs = (n >> (sizeof(TYPE) * 8 - 1)); \
+    rs->fz = (n == 0);
+
+    case I_ADD: EXECUTE_INSTRUCTION(+=); break;
+    case I_SUB: EXECUTE_INSTRUCTION(-=); break;
+
+#undef ASSIGN
+#define ASSIGN(INSTR, TYPE) do {} while(false)
+
+    case I_CMP: EXECUTE_INSTRUCTION(); break;
+
+#undef UPDATE_FLAGS
+
     default: printf("Cannot execute given instruction!\n");
     }
 }
@@ -657,6 +666,9 @@ void print_out_registers_state(registers *rs)
     printf("    DI: ");
     print_binary16(rs->di);
     printf(" (%d)\n", rs->di);
+    printf("Flags:\n"
+           "       FZ -> %d\n"
+           "       FS -> %d\n", rs->fz, rs->fs);
 }
 
 int main(int argc, char **argv)
@@ -789,9 +801,9 @@ int main(int argc, char **argv)
 
         print_instruction(instr);
         execute_instruction(&rs, instr);
+        print_out_registers_state(&rs);
     }
 
-    print_out_registers_state(&rs);
 
     return 0;
 }
