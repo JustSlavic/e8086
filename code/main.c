@@ -771,7 +771,8 @@ void execute_instruction(sim8086 *sim, instruction i)
     void *d = 0;
     int32 w = 0;
 
-    if (i.destination.tag == IOP_REG) choose_register(sim, i.destination.reg, &d, &w);
+    if (i.destination.tag == IOP_IMM) d = &i.destination.imm;
+    else if (i.destination.tag == IOP_REG) choose_register(sim, i.destination.reg, &d, &w);
     else if (i.destination.tag == IOP_MEM)
     {
         d = sim->memory + i.destination.addr.displacement;
@@ -799,7 +800,7 @@ void execute_instruction(sim8086 *sim, instruction i)
 
         d += (r1 + r2);
     }
-    else { printf("Error while executing instruction!\n"); exit(1); }
+    else { printf("Error while executing instruction! (d)\n"); exit(1); }
     if (i.source.tag == IOP_IMM) s = &i.source.imm;
     else if (i.source.tag == IOP_REG) choose_register(sim, i.source.reg, &s, &w);
     else if (i.source.tag == IOP_MEM)
@@ -829,7 +830,7 @@ void execute_instruction(sim8086 *sim, instruction i)
 
         s += (r1 + r2);
     }
-    else { printf("Error while executing instruction!\n"); exit(1); }
+    // else { printf("Error while executing instruction! (%d)\n", i.source.tag); exit(1); }
 
     switch (i.tag)
     {
