@@ -132,6 +132,18 @@ typedef struct
     //     uint16 _u0 : 1;
     //     uint16 _u1 : 1;
     //     uint16 _u2 : 1;
+    //     uint16 _u3 : 1;
+    //     uint16 fo : 1;
+    //     uint16 fd : 1;
+    //     uint16 fi : 1;
+    //     uint16 ft : 1;
+    //     uint16 fs : 1;
+    //     uint16 fz : 1;
+    //     uint16 _u4 : 1;
+    //     uint16 fa : 1;
+    //     uint16 _u5 : 1;
+    //     uint16 f : 1;
+    //     uint16 f : 1;
     // };
     bool fz;
     bool fs;
@@ -334,14 +346,14 @@ typedef struct
 
 effective_address ea_table[8] =
 {
-    { .reg1 = 3, .reg2 = 6, .reg_count = 2 }, // (bx + si + displacement)
-    { .reg1 = 3, .reg2 = 7, .reg_count = 2 }, // (bx + di + displacement)
-    { .reg1 = 5, .reg2 = 6, .reg_count = 2 }, // (bp + si + displacement)
-    { .reg1 = 5, .reg2 = 7, .reg_count = 2 }, // (bp + di + displacement)
-    { .reg1 = 6, .reg_count = 1 },            // (si + displacement)
-    { .reg1 = 7, .reg_count = 1 },            // (di + displacement)
-    { .reg1 = 5, .reg_count = 1 },            // (bp + displacement) OR direct address
-    { .reg1 = 3, .reg_count = 1 },            // (bx + displacement)
+    { .reg1 = R_BX, .reg2 = R_SI, .reg_count = 2 }, // (bx + si + displacement)
+    { .reg1 = R_BX, .reg2 = R_DI, .reg_count = 2 }, // (bx + di + displacement)
+    { .reg1 = R_BP, .reg2 = R_SI, .reg_count = 2 }, // (bp + si + displacement)
+    { .reg1 = R_BP, .reg2 = R_DI, .reg_count = 2 }, // (bp + di + displacement)
+    { .reg1 = R_SI, .reg_count = 1 },            // (si + displacement)
+    { .reg1 = R_DI, .reg_count = 1 },            // (di + displacement)
+    { .reg1 = R_BP, .reg_count = 1 },            // (bp + displacement) OR direct address
+    { .reg1 = R_BX, .reg_count = 1 },            // (bx + displacement)
 };
 
 
@@ -427,6 +439,46 @@ instruction instruction_type1(sim8086 *sim, opcode_info *info)
     return result;
 }
 
+instruction instruction_mov_imm_to_reg_mem(sim8086 *sim, opcode_info *info)
+{
+    uint8 byte1 = sim->memory[sim->rs.ip++];
+    uint8 byte2 = sim->memory[sim->rs.ip++];
+
+    int32 w = (0b00000001 & byte1);
+    int32 mod = (0b11000000 & byte2) >> 6;
+    int32 opc = (0b00111000 & byte2) >> 3;
+    int32 r_m = (0b00000111 & byte2);
+
+    if (opc != 0) return (instruction){};
+
+    instruction result = { .tag = I_MOV };
+
+    if (mod == MOD_RM)
+    {
+        result.destination = (instruction_operand)
+        {
+            .tag = IOP_REG,
+            .reg = r_m | (w << 3),
+        };
+    }
+    else
+    {
+        result.destination = (instruction_operand)
+        {
+            .tag = IOP_MEM,
+            .addr = read_ea(sim, mod, r_m),
+        };
+    }
+
+    result.source = (instruction_operand)
+    {
+        .tag = IOP_IMM,
+        .imm = read_data_bytes(sim, w, 0),
+    };
+
+    return result;
+}
+
 instruction instruction_imm_to_reg(sim8086 *sim, opcode_info *info)
 {
     uint8 byte1 = sim->memory[sim->rs.ip++];
@@ -455,21 +507,21 @@ instruction instruction_imm_to_reg(sim8086 *sim, opcode_info *info)
 }
 
 
-void mov_memory_and_accumulator(sim8086 *sim, opcode_info *info, bool reverse_order)
-{
-    uint8 byte1 = sim->memory[sim->rs.ip++];
+// void mov_memory_and_accumulator(sim8086 *sim, opcode_info *info, bool reverse_order)
+// {
+//     uint8 byte1 = sim->memory[sim->rs.ip++];
 
-    int32 w = 0b00000001 & byte1;
+//     int32 w = 0b00000001 & byte1;
 
-    int32 addr = read_data_bytes(sim, w, 0);
-    (void) addr;
+//     int32 addr = read_data_bytes(sim, w, 0);
+//     (void) addr;
 
     // @todo:
     // if (reverse_order)
     //     printf("    %s [%d], ax\n", instruction_names[info->instruction], addr);
     // else
     //     printf("    %s ax, [%d]\n", instruction_names[info->instruction], addr);
-}
+// }
 
 
 instruction instruction_imm_to_reg_mem(sim8086 *sim, opcode_info *info)
@@ -564,6 +616,83 @@ instruction instruction_jumps(sim8086 *sim, opcode_info *info)
     return result;
 }
 
+instruction decode_next_instruction(sim8086 *sim)
+{
+    instruction result = { .tag = I_NOOP };
+
+    uint8 byte = sim->memory[sim->rs.ip];
+
+    opcode_info info = {};
+    bool found = false;
+    for (int opcode_index = 0; opcode_index < ARRAY_COUNT(opcode_table); opcode_index++)
+    {
+        info = opcode_table[opcode_index];
+        int32 opcode = (byte & info.mask);
+        if (opcode == info.opcode)
+        {
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+    {
+        printf("Can't find opcode for byte: 0b");
+        print_binary8(byte);
+        printf("\n");
+        exit(1);
+    }
+
+    switch (info.opcode)
+    {
+    case OPCODE_MOV1: result = instruction_type1(sim, &info); break;
+    case OPCODE_MOV2: result = instruction_mov_imm_to_reg_mem(sim, &info); break;
+    case OPCODE_MOV3: result = instruction_imm_to_reg(sim, &info); break;
+    // case OPCODE_MOV4: mov_memory_and_accumulator(sim, &info, false); break;
+    // case OPCODE_MOV5: mov_memory_and_accumulator(sim, &info, true); break;
+
+    case OPCODE_ADD1: result = instruction_type1(sim, &info); break;
+    case OPCODE_ADD3: result = instruction_imm_to_acc(sim, &info); break;
+
+    case OPCODE_SUB1: result = instruction_type1(sim, &info); break;
+    case OPCODE_SUB3: result = instruction_imm_to_acc(sim, &info); break;
+
+    case OPCODE_CMP1: result = instruction_type1(sim, &info); break;
+    case OPCODE_CMP3: result = instruction_imm_to_acc(sim, &info); break;
+
+    case OPCODE_JE:
+    case OPCODE_JL:
+    case OPCODE_JLE:
+    case OPCODE_JB:
+    case OPCODE_JBE:
+    case OPCODE_JP:
+    case OPCODE_JO:
+    case OPCODE_JS:
+    case OPCODE_JNE:
+    case OPCODE_JNL:
+    case OPCODE_JNLE:
+    case OPCODE_JNB:
+    case OPCODE_JNBE:
+    case OPCODE_JNP:
+    case OPCODE_JNO:
+    case OPCODE_JNS:
+    case OPCODE_LOOP:
+    case OPCODE_LOOPZ:
+    case OPCODE_LOOPNZ:
+    case OPCODE_JCXZ:
+        result = instruction_jumps(sim, &info);
+        break;
+
+    case OPCODE_IMM_TO_REG_MEM:
+        result = instruction_imm_to_reg_mem(sim, &info); break;
+
+    default:
+        printf("Don't know what to do!\n");
+        exit(1);
+    }
+
+    return result;
+}
+
 void choose_register(sim8086 *sim, int32 reg, void **d, int32 *w)
 {
     switch (reg)
@@ -643,8 +772,64 @@ void execute_instruction(sim8086 *sim, instruction i)
     int32 w = 0;
 
     if (i.destination.tag == IOP_REG) choose_register(sim, i.destination.reg, &d, &w);
+    else if (i.destination.tag == IOP_MEM)
+    {
+        d = sim->memory + i.destination.addr.displacement;
+
+        int32 r1 = 0;
+        int32 r2 = 0;
+        if (i.destination.addr.reg_count > 0)
+        {
+            void *reg = 0;
+            int32 w_ = 0;
+            choose_register(sim, i.destination.addr.reg1, &reg, &w_);
+
+            if (w_) r1 = *(uint16 *) reg;
+            else r1 = *(uint8 *) reg;
+        }
+        if (i.destination.addr.reg_count > 1)
+        {
+            void *reg = 0;
+            int32 w_ = 0;
+            choose_register(sim, i.destination.addr.reg2, &reg, &w_);
+
+            if (w_) r2 = *(uint16 *) reg;
+            else r2 = *(uint8 *) reg;
+        }
+
+        d += (r1 + r2);
+    }
+    else { printf("Error while executing instruction!\n"); exit(1); }
     if (i.source.tag == IOP_IMM) s = &i.source.imm;
     else if (i.source.tag == IOP_REG) choose_register(sim, i.source.reg, &s, &w);
+    else if (i.source.tag == IOP_MEM)
+    {
+        s = sim->memory + i.source.addr.displacement;
+
+        int32 r1 = 0;
+        int32 r2 = 0;
+        if (i.source.addr.reg_count > 0)
+        {
+            void *reg = 0;
+            int32 w_ = 0;
+            choose_register(sim, i.source.addr.reg1, &reg, &w_);
+
+            if (w_) r1 = *(uint16 *) reg;
+            else r1 = *(uint8 *) reg;
+        }
+        if (i.source.addr.reg_count > 1)
+        {
+            void *reg = 0;
+            int32 w_ = 0;
+            choose_register(sim, i.source.addr.reg2, &reg, &w_);
+
+            if (w_) r2 = *(uint16 *) reg;
+            else r2 = *(uint8 *) reg;
+        }
+
+        s += (r1 + r2);
+    }
+    else { printf("Error while executing instruction!\n"); exit(1); }
 
     switch (i.tag)
     {
@@ -729,6 +914,36 @@ void print_out_registers_state(registers *rs)
            rs->fs, rs->fz);
 }
 
+void print_out_memory_state(sim8086 *sim, int32 low_addr, int32 high_addr)
+{
+    while (low_addr < high_addr)
+    {
+        int32 reminder = low_addr % 16;
+        int32 print_address = low_addr - reminder;
+
+        printf("0x%016x | ", print_address);
+
+        // print reminder of bytes
+
+        for (int i = 0; i < 16; i++)
+        {
+            printf("%02x ", sim->memory[print_address + i]);
+        }
+
+        printf(" | ");
+
+        for (int i = 0; i < 16; i++)
+        {
+            char c = sim->memory[print_address + i];
+            bool is_ascii = c > 31 && c < 127;
+            printf("%c", is_ascii ? c : '.');
+        }
+
+        printf("\n");
+        low_addr = print_address + 16;
+    }
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2)
@@ -744,9 +959,11 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    sim8086 sim = {};
-    sim.size = 1024;
-    sim.memory = malloc(sim.size);
+    sim8086 sim =
+    {
+        .size = 1 << 16,
+        .memory = malloc(1 << 16),
+    };
     memset(sim.memory, 0, sim.size);
 
     size_t n = fread(sim.memory, 1, sim.size, f);
@@ -758,83 +975,13 @@ int main(int argc, char **argv)
 
     while (sim.rs.ip < n)
     {
-        uint8 byte = sim.memory[sim.rs.ip];
-
-        opcode_info info = {};
-        bool found = false;
-        for (int opcode_index = 0; opcode_index < ARRAY_COUNT(opcode_table); opcode_index++)
-        {
-            info = opcode_table[opcode_index];
-            int32 opcode = (byte & info.mask);
-            if (opcode == info.opcode)
-            {
-                found = true;
-                break;
-            }
-        }
-        if (!found)
-        {
-            printf("Can't find opcode for byte: 0b");
-            print_binary8(byte);
-            printf("\n");
-            exit(1);
-        }
-
-        instruction instr = { .tag = I_NOOP };
-
-        switch (info.opcode)
-        {
-        case OPCODE_MOV1: instr = instruction_type1(&sim, &info); break;
-        // case OPCODE_MOV2: instruction_mov_imm_to_reg_mem(&sim, &info); break;
-        case OPCODE_MOV3: instr = instruction_imm_to_reg(&sim, &info); break;
-        case OPCODE_MOV4: mov_memory_and_accumulator(&sim, &info, false); break;
-        case OPCODE_MOV5: mov_memory_and_accumulator(&sim, &info, true); break;
-
-        case OPCODE_ADD1: instr = instruction_type1(&sim, &info); break;
-        case OPCODE_ADD3: instr = instruction_imm_to_acc(&sim, &info); break;
-
-        case OPCODE_SUB1: instr = instruction_type1(&sim, &info); break;
-        case OPCODE_SUB3: instr = instruction_imm_to_acc(&sim, &info); break;
-
-        case OPCODE_CMP1: instr = instruction_type1(&sim, &info); break;
-        case OPCODE_CMP3: instr = instruction_imm_to_acc(&sim, &info); break;
-
-        case OPCODE_JE:
-        case OPCODE_JL:
-        case OPCODE_JLE:
-        case OPCODE_JB:
-        case OPCODE_JBE:
-        case OPCODE_JP:
-        case OPCODE_JO:
-        case OPCODE_JS:
-        case OPCODE_JNE:
-        case OPCODE_JNL:
-        case OPCODE_JNLE:
-        case OPCODE_JNB:
-        case OPCODE_JNBE:
-        case OPCODE_JNP:
-        case OPCODE_JNO:
-        case OPCODE_JNS:
-        case OPCODE_LOOP:
-        case OPCODE_LOOPZ:
-        case OPCODE_LOOPNZ:
-        case OPCODE_JCXZ:
-            instr = instruction_jumps(&sim, &info);
-            break;
-
-        case OPCODE_IMM_TO_REG_MEM:
-            instr = instruction_imm_to_reg_mem(&sim, &info); break;
-
-        default:
-            printf("Don't know what to do!\n");
-            exit(1);
-        }
-
+        instruction instr = decode_next_instruction(&sim);
         print_instruction(instr);
         execute_instruction(&sim, instr);
-        print_out_registers_state(&sim.rs);
     }
 
+    print_out_registers_state(&sim.rs);
+    print_out_memory_state(&sim, 999, 1024);
 
     return 0;
 }
