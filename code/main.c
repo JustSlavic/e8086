@@ -8,6 +8,8 @@ typedef int bool;
 #define true 1
 #define false 0
 
+char const *spaces = "                                          ";
+
 typedef   signed char   int8;
 typedef unsigned char  uint8;
 typedef          short  int16;
@@ -99,10 +101,10 @@ enum opcode
 
 enum
 {
-    MOD_MM   = 0b00,
-    MOD_MM8  = 0b01,
-    MOD_MM16 = 0b10,
-    MOD_RM   = 0b11,
+    MOD_00 = 0b00,
+    MOD_01 = 0b01,
+    MOD_10 = 0b10,
+    MOD_RM = 0b11,
 };
 
 enum
@@ -180,6 +182,7 @@ typedef struct
     uint32 reg1, reg2;
     uint32 reg_count; // 0, 1, or 2
     uint32 displacement;
+    int32  cycles;
 } effective_address;
 
 typedef struct
@@ -198,6 +201,7 @@ typedef struct
     instruction_tag tag;
 
     instruction_operand source, destination;
+    int32 cycles;
 } instruction;
 
 typedef struct
@@ -280,60 +284,78 @@ char const *instruction_names[] =
     "JCXZ",
 };
 
-void print_ea(effective_address ea)
+int print_ea(effective_address ea)
 {
+    int n = 0;
     if (ea.reg_count == 0)
     {
-        printf("[%d]", ea.displacement);
+        n += printf("[%d]", ea.displacement);
     }
     else if (ea.reg_count == 1)
     {
-        printf("[%s", register_names[ea.reg1 | 0b1000]);
+        n += printf("[%s", register_names[ea.reg1 | 0b1000]);
         if (ea.displacement == 0)
         {
-            printf("]");
+            n += printf("]");
         }
         else
         {
-            printf(" + %d]", ea.displacement);
+            n += printf(" + %d]", ea.displacement);
         }
     }
     else if (ea.reg_count == 2)
     {
-        printf("[%s + %s", register_names[ea.reg1 | 0b1000],
+        n += printf("[%s + %s", register_names[ea.reg1 | 0b1000],
             register_names[ea.reg2 | 0b1000]);
         if (ea.displacement == 0)
         {
-            printf("]");
+            n += printf("]");
         }
         else
         {
-            printf(" + %d]", ea.displacement);
+            n += printf(" + %d]", ea.displacement);
         }
     }
+    return n;
 }
 
-void print_instruction_operand(instruction_operand iop)
+int print_instruction_operand(instruction_operand iop)
 {
+    int n = 0;
     switch (iop.tag)
     {
     case IOPERAND_NONE: break;
-    case IOP_IMM: printf("%d", iop.imm); break;
-    case IOP_REG: printf("%s", register_names[iop.reg]); break;
-    case IOP_MEM: print_ea(iop.addr); break;
+    case IOP_IMM: n += printf("%d", iop.imm); break;
+    case IOP_REG: n += printf("%s", register_names[iop.reg]); break;
+    case IOP_MEM: n += print_ea(iop.addr); break;
     }
+    return n;
 }
 
-void print_instruction(instruction i)
+int print_instruction(int32 cycles, instruction i)
 {
-    printf("    %s ", instruction_names[i.tag]);
-    print_instruction_operand(i.destination);
+    int n = 0;
+    n += printf("    %s ", instruction_names[i.tag]);
+    n += print_instruction_operand(i.destination);
     if (i.source.tag != IOPERAND_NONE)
     {
-        printf(", ");
-        print_instruction_operand(i.source);
+        n += printf(", ");
+        n += print_instruction_operand(i.source);
     }
-    printf("\n");
+    int ea_cycles = (i.destination.tag == IOP_MEM) ? i.destination.addr.cycles
+                  : (i.source.tag == IOP_MEM) ? i.source.addr.cycles
+                  : 0;
+    if (ea_cycles > 0)
+        n += printf("%.*s%d = %d + %dea cycles (overall: %d)\n",
+            30 - n, spaces,
+            i.cycles + ea_cycles,
+            i.cycles, ea_cycles,
+            i.cycles + ea_cycles + cycles);
+    else
+        n += printf("%.*s%d (overall: %d)\n",
+            30 - n, spaces,
+            i.cycles, i.cycles + cycles);
+    return n;
 }
 
 typedef struct
@@ -342,41 +364,67 @@ typedef struct
     uint32 size;
 
     registers rs;
+
+    int32 cycles;
 } sim8086;
 
-effective_address ea_table[8] =
+effective_address ea_table[3][8] =
 {
-    { .reg1 = R_BX, .reg2 = R_SI, .reg_count = 2 }, // (bx + si + displacement)
-    { .reg1 = R_BX, .reg2 = R_DI, .reg_count = 2 }, // (bx + di + displacement)
-    { .reg1 = R_BP, .reg2 = R_SI, .reg_count = 2 }, // (bp + si + displacement)
-    { .reg1 = R_BP, .reg2 = R_DI, .reg_count = 2 }, // (bp + di + displacement)
-    { .reg1 = R_SI, .reg_count = 1 },            // (si + displacement)
-    { .reg1 = R_DI, .reg_count = 1 },            // (di + displacement)
-    { .reg1 = R_BP, .reg_count = 1 },            // (bp + displacement) OR direct address
-    { .reg1 = R_BX, .reg_count = 1 },            // (bx + displacement)
+    // mod == 00 (MOD_00)
+    {
+        { .reg1 = R_BX, .reg2 = R_SI, .reg_count = 2, .cycles = 7 },  // bx + si
+        { .reg1 = R_BX, .reg2 = R_DI, .reg_count = 2, .cycles = 8 },  // bx + di
+        { .reg1 = R_BP, .reg2 = R_SI, .reg_count = 2, .cycles = 8 },  // bp + si
+        { .reg1 = R_BP, .reg2 = R_DI, .reg_count = 2, .cycles = 7 },  // bp + di
+        { .reg1 = R_SI,               .reg_count = 1, .cycles = 5 },  // si
+        { .reg1 = R_DI,               .reg_count = 1, .cycles = 5 },  // di
+        {                             .reg_count = 0, .cycles = 6 },  // direct address
+        { .reg1 = R_BX,               .reg_count = 1, .cycles = 5 },  // bx
+    },
+    // mod == 01 (MOD_01)
+    {
+        { .reg1 = R_BX, .reg2 = R_SI, .reg_count = 2, .cycles = 11 }, // bx + si + 8bit displacement
+        { .reg1 = R_BX, .reg2 = R_DI, .reg_count = 2, .cycles = 12 }, // bx + di + 8bit displacement
+        { .reg1 = R_BP, .reg2 = R_SI, .reg_count = 2, .cycles = 12 }, // bp + si + 8bit displacement
+        { .reg1 = R_BP, .reg2 = R_DI, .reg_count = 2, .cycles = 11 }, // bp + di + 8bit displacement
+        { .reg1 = R_SI,               .reg_count = 1, .cycles = 9 },  // si + 8bit displacement
+        { .reg1 = R_DI,               .reg_count = 1, .cycles = 9 },  // di + 8bit displacement
+        { .reg1 = R_BP,               .reg_count = 1, .cycles = 9 },  // bp + 8bit displacement
+        { .reg1 = R_BX,               .reg_count = 1, .cycles = 9 },  // bx + 8bit displacement
+    },
+    // mod == 10 (MOD_10)
+    {
+        { .reg1 = R_BX, .reg2 = R_SI, .reg_count = 2, .cycles = 11 }, // bx + si + 16 bit displacement
+        { .reg1 = R_BX, .reg2 = R_DI, .reg_count = 2, .cycles = 12 }, // bx + di + 16 bit displacement
+        { .reg1 = R_BP, .reg2 = R_SI, .reg_count = 2, .cycles = 12 }, // bp + si + 16 bit displacement
+        { .reg1 = R_BP, .reg2 = R_DI, .reg_count = 2, .cycles = 11 }, // bp + di + 16 bit displacement
+        { .reg1 = R_SI,               .reg_count = 1, .cycles = 9 },  // si + 16 bit displacement
+        { .reg1 = R_DI,               .reg_count = 1, .cycles = 9 },  // di + 16 bit displacement
+        { .reg1 = R_BP,               .reg_count = 1, .cycles = 9 },  // bp + 16 bit displacement
+        { .reg1 = R_BX,               .reg_count = 1, .cycles = 9 },  // bx + 16 bit displacement
+    },
 };
 
 
 effective_address read_ea(sim8086 *sim, int32 mod, int32 r_m)
 {
-    effective_address ea = ea_table[r_m];
+    effective_address ea = ea_table[mod][r_m];
 
-    if (mod == MOD_MM)
+    if (mod == MOD_00)
     {
         // Direct address reading
         if (r_m == 0b110)
         {
-            ea.reg_count = 0;
             ea.displacement = *(int16 *) (sim->memory + sim->rs.ip);
             sim->rs.ip += 2;
         }
     }
-    else if (mod == MOD_MM8)
+    else if (mod == MOD_01)
     {
         ea.displacement = *(int8 *) (sim->memory + sim->rs.ip);
         sim->rs.ip += 1;
     }
-    else if (mod == MOD_MM16)
+    else if (mod == MOD_10)
     {
         ea.displacement = *(int16 *) (sim->memory + sim->rs.ip);
         sim->rs.ip += 2;
@@ -418,15 +466,38 @@ instruction instruction_type1(sim8086 *sim, opcode_info *info)
 
     if (mod == MOD_RM)
     {
-        result.destination = (instruction_operand){ .tag = IOP_REG, .reg = r_m | (w << 3) };
+        // INSTR rx, rx
+        result.destination = (instruction_operand)
+        {
+            .tag = IOP_REG,
+            .reg = r_m | (w << 3)
+        };
+        switch (info->instruction)
+        {
+        case I_MOV: result.cycles = 2; break;
+        case I_ADD: result.cycles = 3; break;
+        case I_SUB: result.cycles = 3; break;
+        case I_CMP: result.cycles = 3; break;
+        default: break;
+        }
     }
     else
     {
+        // if (d) INSTR [ea], rx
+        //        INSTR rx, [ea]
         result.destination = (instruction_operand)
         {
             .tag = IOP_MEM,
             .addr = read_ea(sim, mod, r_m),
         };
+        switch (info->instruction)
+        {
+        case I_MOV: result.cycles = d ? 8 : 9; break;
+        case I_ADD: result.cycles = d ? 9 : 16; break;
+        case I_SUB: result.cycles = d ? 9 : 16; break;
+        case I_CMP: result.cycles = 9; break;
+        default: break;
+        }
     }
 
     if (d)
@@ -460,6 +531,7 @@ instruction instruction_mov_imm_to_reg_mem(sim8086 *sim, opcode_info *info)
             .tag = IOP_REG,
             .reg = r_m | (w << 3),
         };
+        result.cycles = 4;
     }
     else
     {
@@ -468,6 +540,7 @@ instruction instruction_mov_imm_to_reg_mem(sim8086 *sim, opcode_info *info)
             .tag = IOP_MEM,
             .addr = read_ea(sim, mod, r_m),
         };
+        result.cycles = 10;
     }
 
     result.source = (instruction_operand)
@@ -502,6 +575,15 @@ instruction instruction_imm_to_reg(sim8086 *sim, opcode_info *info)
             .reg = reg | (w << 3),
         }
     };
+    switch (info->instruction)
+    {
+    case I_MOV:
+    case I_ADD:
+    case I_SUB:
+    case I_CMP:
+        result.cycles = 4; break;
+    default: break;
+    }
 
     return result;
 }
@@ -555,6 +637,15 @@ instruction instruction_imm_to_reg_mem(sim8086 *sim, opcode_info *info)
             .tag = IOP_REG,
             .reg = r_m | (w << 3),
         };
+        switch (result.tag)
+        {
+        case I_MOV:
+        case I_ADD:
+        case I_SUB:
+        case I_CMP:
+            result.cycles = 4; break;
+        default: break;
+        }
     }
     else
     {
@@ -563,6 +654,14 @@ instruction instruction_imm_to_reg_mem(sim8086 *sim, opcode_info *info)
             .tag = IOP_MEM,
             .addr = read_ea(sim, mod, r_m),
         };
+        switch (info->instruction)
+        {
+        case I_MOV: result.cycles = 10; break;
+        case I_ADD: result.cycles = 17; break;
+        case I_SUB: result.cycles = 17; break;
+        case I_CMP: result.cycles = 10; break;
+        default: break;
+        }
     }
 
     result.source = (instruction_operand)
@@ -596,6 +695,15 @@ instruction instruction_imm_to_acc(sim8086 *sim, opcode_info *info)
             .reg = w << 3,
         }
     };
+    switch (info->instruction)
+    {
+    case I_MOV:
+    case I_ADD:
+    case I_SUB:
+    case I_CMP:
+        result.cycles = 4; break;
+    default: break;
+    }
     return result;
 }
 
@@ -613,6 +721,14 @@ instruction instruction_jumps(sim8086 *sim, opcode_info *info)
             .imm = ip_inc8,
         },
     };
+    switch (info->instruction)
+    {
+    case I_JE:  result.cycles = (sim->rs.fz == 1) ? 16 : 4; break;
+    case I_JNE: result.cycles = (sim->rs.fz == 0) ? 16 : 4; break;
+    case I_JS:  result.cycles = (sim->rs.fs == 1) ? 16 : 4; break;
+    case I_JNS: result.cycles = (sim->rs.fs == 0) ? 16 : 4; break;
+    default: result.cycles = 4;
+    }
     return result;
 }
 
@@ -762,14 +878,13 @@ void execute_cmp(sim8086 *sim, void *d, void *s, int32 w)
     }
 }
 
-// #define execute_zjump(CMP, OFFSET) \
-//     do { if (sim->rs.fs CMP 0) } while (false)
-
 void execute_instruction(sim8086 *sim, instruction i)
 {
     void *s = 0;
     void *d = 0;
     int32 w = 0;
+
+    int32 ea_cycles = 0;
 
     if (i.destination.tag == IOP_IMM) d = &i.destination.imm;
     else if (i.destination.tag == IOP_REG) choose_register(sim, i.destination.reg, &d, &w);
@@ -782,25 +897,26 @@ void execute_instruction(sim8086 *sim, instruction i)
         if (i.destination.addr.reg_count > 0)
         {
             void *reg = 0;
-            int32 w_ = 0;
-            choose_register(sim, i.destination.addr.reg1, &reg, &w_);
+            choose_register(sim, i.destination.addr.reg1, &reg, &w);
 
-            if (w_) r1 = *(uint16 *) reg;
+            if (w) r1 = *(uint16 *) reg;
             else r1 = *(uint8 *) reg;
         }
         if (i.destination.addr.reg_count > 1)
         {
             void *reg = 0;
-            int32 w_ = 0;
-            choose_register(sim, i.destination.addr.reg2, &reg, &w_);
+            int32 w = 0;
+            choose_register(sim, i.destination.addr.reg2, &reg, &w);
 
-            if (w_) r2 = *(uint16 *) reg;
+            if (w) r2 = *(uint16 *) reg;
             else r2 = *(uint8 *) reg;
         }
 
         d += (r1 + r2);
+        ea_cycles = i.destination.addr.cycles;
     }
     else { printf("Error while executing instruction! (d)\n"); exit(1); }
+
     if (i.source.tag == IOP_IMM) s = &i.source.imm;
     else if (i.source.tag == IOP_REG) choose_register(sim, i.source.reg, &s, &w);
     else if (i.source.tag == IOP_MEM)
@@ -812,23 +928,23 @@ void execute_instruction(sim8086 *sim, instruction i)
         if (i.source.addr.reg_count > 0)
         {
             void *reg = 0;
-            int32 w_ = 0;
-            choose_register(sim, i.source.addr.reg1, &reg, &w_);
+            choose_register(sim, i.source.addr.reg1, &reg, &w);
 
-            if (w_) r1 = *(uint16 *) reg;
+            if (w) r1 = *(uint16 *) reg;
             else r1 = *(uint8 *) reg;
         }
         if (i.source.addr.reg_count > 1)
         {
             void *reg = 0;
-            int32 w_ = 0;
-            choose_register(sim, i.source.addr.reg2, &reg, &w_);
+            int32 w = 0;
+            choose_register(sim, i.source.addr.reg2, &reg, &w);
 
-            if (w_) r2 = *(uint16 *) reg;
+            if (w) r2 = *(uint16 *) reg;
             else r2 = *(uint8 *) reg;
         }
 
         s += (r1 + r2);
+        ea_cycles = i.source.addr.cycles;
     }
     // else { printf("Error while executing instruction! (%d)\n", i.source.tag); exit(1); }
 
@@ -867,6 +983,8 @@ void execute_instruction(sim8086 *sim, instruction i)
 
     default: printf("Cannot execute given instruction!\n");
     }
+
+    sim->cycles += i.cycles + ea_cycles;
 }
 
 void print_out_compound_register_state(uint16 rx)
@@ -977,7 +1095,7 @@ int main(int argc, char **argv)
     while (sim.rs.ip < n)
     {
         instruction instr = decode_next_instruction(&sim);
-        print_instruction(instr);
+        print_instruction(sim.cycles, instr);
         execute_instruction(&sim, instr);
     }
 
